@@ -1,0 +1,26 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "uid": "MJhn8Bk20dfJGW214fwdrGEz7SH2",
+      "userName": "ahmed.faris89@gmail.com",
+      "email": "ahmed.faris89@gmail.com",
+      "emailConfirmed": false,
+      "fullName": "ahmed faris",
+      "department": null,
+      "jobTitle": null,
+      "role": "Employee",
+      "userType": "Operational User",
+      "failedAccessCount": 0,
+      "lockoutEnd": null,
+      "isLockedOut": false,
+      "mustChangePassword": false,
+      "twoFactorEnabled": false,
+      "createdAt": "2026-09-16T14:46:10.063Z",
+      "lastActiveAt": "2026-09-16T14:46:10.063Z",
+      "avatarColor": "bg-slate-500",
+      "phone": null
+    }
+  ],
+  "exportedAt": "2026-09-16T17:10:07.799Z"
+}

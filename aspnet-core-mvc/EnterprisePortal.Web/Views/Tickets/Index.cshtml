@@ -1,0 +1,120 @@
+@model List<EnterprisePortal.Web.Models.Ticket>
+@{
+    ViewData["Title"] = "Incident & Ticket Management";
+}
+
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-6 border-b border-slate-800 gap-4">
+        <div>
+            <h1 class="text-2xl font-black text-white flex items-center space-x-3">
+                <i class="fa-solid fa-ticket text-blue-400"></i>
+                <span>Incident & Ticket Management</span>
+            </h1>
+            <p class="text-xs text-slate-400 mt-1">Enterprise service desk, automated SLA deadlines, and audit trail.</p>
+        </div>
+        <a asp-action="Create" class="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-lg shadow-blue-600/30 transition">
+            <i class="fa-solid fa-plus"></i>
+            <span>New Incident Ticket</span>
+        </a>
+    </div>
+
+    <!-- Search & Filters -->
+    <form method="get" class="grid grid-cols-1 sm:grid-cols-4 gap-4 p-4 rounded-xl bg-slate-900 border border-slate-800">
+        <div class="sm:col-span-2">
+            <input type="text" name="search" value="@ViewBag.CurrentSearch" placeholder="Search ticket title, requester, or department..." class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500" />
+        </div>
+        <div>
+            <select name="status" class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500">
+                <option value="">All Statuses</option>
+                <option value="Open">Open</option>
+                <option value="InProgress">In Progress</option>
+                <option value="Resolved">Resolved</option>
+                <option value="Closed">Closed</option>
+            </select>
+        </div>
+        <div class="flex space-x-2">
+            <button type="submit" class="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-white font-semibold rounded-lg text-xs transition">
+                Filter
+            </button>
+            <a asp-action="Index" class="py-2 px-3 bg-slate-950 hover:bg-slate-800 text-slate-400 font-semibold rounded-lg text-xs transition">
+                Reset
+            </a>
+        </div>
+    </form>
+
+    <!-- Table -->
+    <div class="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900 shadow-xl">
+        <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-950/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+                <tr>
+                    <th class="py-3 px-4">Ticket</th>
+                    <th class="py-3 px-4">Category</th>
+                    <th class="py-3 px-4">Priority</th>
+                    <th class="py-3 px-4">Status</th>
+                    <th class="py-3 px-4">SLA Deadline</th>
+                    <th class="py-3 px-4">Requester</th>
+                    <th class="py-3 px-4 text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800">
+                @if (!Model.Any())
+                {
+                    <tr>
+                        <td colspan="7" class="py-8 text-center text-slate-500">No incident tickets match the selected filters.</td>
+                    </tr>
+                }
+                @foreach (var item in Model)
+                {
+                    <tr class="hover:bg-slate-800/40 transition">
+                        <td class="py-3 px-4 font-semibold text-white">
+                            <a asp-action="Details" asp-route-id="@item.Id" class="hover:text-blue-400">
+                                @item.Title
+                            </a>
+                            <div class="text-[10px] font-mono text-slate-500">#@item.Id[..8]</div>
+                        </td>
+                        <td class="py-3 px-4 text-slate-400">@item.Category</td>
+                        <td class="py-3 px-4">
+                            @if (item.Priority == TicketPriority.Critical || item.Priority == TicketPriority.Urgent)
+                            {
+                                <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-300 border border-red-500/30">@item.Priority</span>
+                            }
+                            else if (item.Priority == TicketPriority.High)
+                            {
+                                <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">@item.Priority</span>
+                            }
+                            else
+                            {
+                                <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">@item.Priority</span>
+                            }
+                        </td>
+                        <td class="py-3 px-4">
+                            <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300">@item.Status</span>
+                        </td>
+                        <td class="py-3 px-4 font-mono text-[11px]">
+                            @if (item.SlaBreached)
+                            {
+                                <span class="text-red-400 font-bold flex items-center space-x-1">
+                                    <i class="fa-solid fa-triangle-exclamation"></i>
+                                    <span>BREACHED</span>
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="text-emerald-400">@item.SlaDeadline.ToString("MM/dd HH:mm") UTC</span>
+                            }
+                        </td>
+                        <td class="py-3 px-4">
+                            <div>@item.RequesterName</div>
+                            <div class="text-[10px] text-slate-500">@item.Department</div>
+                        </td>
+                        <td class="py-3 px-4 text-right">
+                            <a asp-action="Details" asp-route-id="@item.Id" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-semibold transition">
+                                View
+                            </a>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>

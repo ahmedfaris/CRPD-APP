@@ -1,0 +1,36 @@
+@model IEnumerable<TicketManagementSystem.Models.Ticket>
+@{
+    ViewData["Title"] = "Tickets Dashboard";
+}
+
+<h1>Tickets Dashboard</h1>
+
+@if (User.IsInRole("Operational User") || User.IsInRole("System Admin"))
+{
+    <a asp-action="Create" class="btn btn-primary mb-3">Create New Ticket</a>
+}
+
+<table class="table">
+    <thead>
+        <tr>
+            <th>Ticket No</th>
+            <th>Title</th>
+            <th>Creation Date</th>
+            <th>Priority</th>
+            <th>Stage</th>
+            <th>Team</th>
+        </tr>
+    </thead>
+    <tbody>
+@foreach (var item in Model) {
+        <tr>
+            <td>@Html.DisplayFor(modelItem => item.TicketNo)</td>
+            <td>@Html.DisplayFor(modelItem => item.Title)</td>
+            <td>@item.CreationDate.ToString("yyyy-MM-dd")</td>
+            <td>@item.Priority Stars</td>
+            <td>@(item.Stage?.Name ?? "N/A")</td>
+            <td>@(item.AssignedTeam?.Name ?? "N/A")</td>
+        </tr>
+}
+    </tbody>
+</table>

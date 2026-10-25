@@ -1,0 +1,56 @@
+@model EnterprisePortal.Web.Models.Verify2FAViewModel
+@{
+    ViewData["Title"] = "Two-Factor Verification";
+}
+
+<div class="min-h-[calc(100vh-8rem)] flex items-center justify-center px-4 sm:px-6 lg:px-8 py-12">
+    <div class="max-w-md w-full space-y-6 bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl">
+        <div class="text-center">
+            <div class="w-14 h-14 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center mx-auto text-cyan-400 mb-4">
+                <i class="fa-solid fa-mobile-screen-button text-2xl"></i>
+            </div>
+            <h2 class="text-2xl font-black text-white tracking-tight">Authenticator Challenge</h2>
+            <p class="text-xs text-slate-400 mt-2">
+                @(Model.IsFirstTimeSetup ? "Scan the QR code with Google Authenticator or Microsoft Authenticator, then enter the 6-digit code." : "Enter the 6-digit time-based code generated on your authenticator app.")
+            </p>
+        </div>
+
+        @if (Model.IsFirstTimeSetup && !string.IsNullOrEmpty(Model.QrCodeBase64))
+        {
+            <div class="p-4 rounded-xl bg-slate-950 border border-slate-800 text-center space-y-3">
+                <span class="text-xs font-bold text-cyan-300 block">Initial 2FA Device Registration</span>
+                <div class="bg-white p-3 rounded-lg inline-block shadow-md">
+                    <img src="data:image/png;base64,@Model.QrCodeBase64" alt="2FA QR Code" class="w-40 h-40 mx-auto" />
+                </div>
+                <div class="text-[11px] font-mono text-slate-400">
+                    <span>Manual Secret: </span>
+                    <span class="text-amber-400 font-bold tracking-widest select-all">@Model.SecretKey</span>
+                </div>
+            </div>
+        }
+
+        <form asp-controller="Account" asp-action="Verify2FA" method="post" class="space-y-5">
+            <input type="hidden" asp-for="UserId" />
+            <input type="hidden" asp-for="RememberMe" />
+            <input type="hidden" asp-for="ReturnUrl" />
+            <input type="hidden" asp-for="IsFirstTimeSetup" />
+
+            <div>
+                <label asp-for="Code" class="block text-xs font-bold text-slate-300 mb-1 text-center">6-Digit TOTP Passcode</label>
+                <input asp-for="Code" class="block w-full py-3 px-4 bg-slate-950 border border-slate-700 rounded-xl text-white text-center text-2xl font-mono tracking-widest focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500" placeholder="000000" maxlength="6" autofocus required />
+                <span asp-validation-for="Code" class="text-xs text-red-400 block text-center mt-1"></span>
+            </div>
+
+            <button type="submit" class="w-full py-3 px-4 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl text-sm transition shadow-lg shadow-cyan-600/30 flex items-center justify-center space-x-2">
+                <i class="fa-solid fa-shield-check"></i>
+                <span>Validate & Authorize Session</span>
+            </button>
+        </form>
+
+        <div class="text-center pt-2">
+            <a asp-controller="Account" asp-action="Login" class="text-xs text-slate-400 hover:text-white transition">
+                <i class="fa-solid fa-arrow-left mr-1"></i> Return to Sign In
+            </a>
+        </div>
+    </div>
+</div>

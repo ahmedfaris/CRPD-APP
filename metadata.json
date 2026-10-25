@@ -1,0 +1,8 @@
+{
+  "name": "CRPD APP",
+  "description": "Enterprise multi-app platform with Metro interface, Ticket Management, Archiving, Employee Management, Asset Management, User Policy Control, and PostgreSQL database.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,139 @@
+@import "tailwindcss";
+
+:root {
+  font-family: 'Cairo', 'Tajawal', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --app-safe-top: env(safe-area-inset-top, 0px);
+  --app-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --app-safe-left: env(safe-area-inset-left, 0px);
+  --app-safe-right: env(safe-area-inset-right, 0px);
+}
+
+/* Responsive root typography scaling across iPhone, Android, iPad, and Desktop */
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* iPad & Tablet: Generous legible sizing */
+@media (min-width: 768px) {
+  html {
+    font-size: 16.5px;
+  }
+}
+
+/* Desktop & Large Displays */
+@media (min-width: 1280px) {
+  html {
+    font-size: 17px;
+  }
+}
+
+body {
+  font-family: 'Cairo', 'Tajawal', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.6;
+  overscroll-behavior-y: none;
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
+}
+
+/* Elevate small font sizes to be comfortably readable on mobile, tablets, and Arabic scripts */
+.text-xs {
+  font-size: 0.84rem !important; /* ~13.5px - 14px */
+  line-height: 1.35rem !important;
+}
+
+.text-\[10px\],
+.text-\[11px\] {
+  font-size: 0.8rem !important; /* ~13px */
+  line-height: 1.25rem !important;
+}
+
+.text-sm {
+  font-size: 0.95rem !important; /* ~15.5px - 16px */
+  line-height: 1.45rem !important;
+}
+
+.text-base {
+  font-size: 1.05rem !important; /* ~17px */
+  line-height: 1.6rem !important;
+}
+
+.text-lg {
+  font-size: 1.2rem !important;
+  line-height: 1.7rem !important;
+}
+
+.text-xl {
+  font-size: 1.35rem !important;
+  line-height: 1.85rem !important;
+}
+
+.text-2xl {
+  font-size: 1.65rem !important;
+  line-height: 2.15rem !important;
+}
+
+/* Form Inputs: Prevent iOS Safari from auto-zooming viewport on iPhone by enforcing >= 16px font-size */
+input,
+select,
+textarea {
+  font-size: 1rem !important; /* >= 16px */
+  touch-action: manipulation;
+}
+
+/* Touch Targets: Comfortable tap areas on mobile (iPhone & Android) and iPad */
+@media (max-width: 1024px) {
+  button,
+  a[role="button"],
+  input[type="button"],
+  input[type="submit"],
+  select {
+    min-height: 38px;
+  }
+}
+
+/* Smooth Touch Momentum Scrolling for tables, card lists & horizontal drawers */
+.overflow-x-auto,
+.overflow-y-auto {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+/* Subtle modern scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.55);
+}
+
+/* RTL Helpers and smooth transitions */
+[dir="rtl"] {
+  text-align: right;
+}
+
+/* Support for iPhone safe areas (Notch / Dynamic Island) */
+.safe-area-pt {
+  padding-top: max(1rem, env(safe-area-inset-top));
+}
+
+.safe-area-pb {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}

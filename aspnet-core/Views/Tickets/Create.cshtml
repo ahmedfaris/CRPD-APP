@@ -1,0 +1,100 @@
+@model TicketManagementSystem.Models.Ticket
+@{
+    ViewData["Title"] = "Create Ticket";
+}
+
+<h1>Create New Ticket</h1>
+
+@if (!User.IsInRole("Operational User") && !User.IsInRole("System Admin"))
+{
+    <div class="alert alert-danger">You do not have permission to create a ticket.</div>
+}
+else
+{
+    <form asp-action="Create" enctype="multipart/form-data" id="ticketWizardForm">
+        @Html.AntiForgeryToken()
+
+        <!-- Wizard Navigation -->
+        <div class="step-indicator mb-4">
+            <span class="step-1 font-weight-bold">Step 1: Classification</span> >
+            <span class="step-2">Step 2: Department Doc</span> >
+            <span class="step-3">Step 3: Details & Attachments</span> >
+            <span class="step-4">Step 4: Review</span>
+        </div>
+
+        <!-- Step 1: Classification -->
+        <div id="step1">
+            <div class="form-group">
+                <label asp-for="TicketType" class="control-label">Ticket Type</label>
+                <select asp-for="TicketType" class="form-control">
+                    <option value="Hardware Maintenance">Hardware Maintenance</option>
+                    <option value="Information System Troubleshoot">Information System Troubleshoot</option>
+                    <option value="User Request">User Request</option>
+                </select>
+            </div>
+            <button type="button" class="btn btn-secondary mt-2" onclick="nextStep(2)">Next</button>
+        </div>
+
+        <!-- Step 2: Department Request Document -->
+        <div id="step2" style="display:none;">
+            <div class="form-group">
+                <label>Department Request Number</label>
+                <input asp-for="DepartmentRequestNumber" class="form-control" />
+            </div>
+            <div class="form-group">
+                <label>Request Date</label>
+                <input asp-for="DepartmentRequestDate" type="date" class="form-control" />
+            </div>
+            <div class="form-group">
+                <label>Upload Official Document (PDF)</label>
+                <input type="file" name="pdfDocument" accept=".pdf" class="form-control" />
+            </div>
+            <button type="button" class="btn btn-secondary mt-2" onclick="nextStep(1)">Previous</button>
+            <button type="button" class="btn btn-secondary mt-2" onclick="nextStep(3)">Next</button>
+        </div>
+
+        <!-- Step 3: Issue Details -->
+        <div id="step3" style="display:none;">
+            <div class="form-group">
+                <label asp-for="Title" class="control-label"></label>
+                <input asp-for="Title" class="form-control" />
+            </div>
+            <div class="form-group">
+                <label asp-for="Description" class="control-label"></label>
+                <textarea asp-for="Description" class="form-control"></textarea>
+            </div>
+            <div class="form-group">
+                <label asp-for="Priority" class="control-label">Priority (1-3 Stars)</label>
+                <input asp-for="Priority" type="number" min="1" max="3" class="form-control" />
+            </div>
+            <div class="form-group">
+                <label>Upload Visual Attachments (Max 3, JPEG/PNG)</label>
+                <input type="file" name="visualAttachments" accept=".jpg,.png" multiple class="form-control" />
+            </div>
+            <button type="button" class="btn btn-secondary mt-2" onclick="nextStep(2)">Previous</button>
+            <button type="button" class="btn btn-secondary mt-2" onclick="nextStep(4)">Review</button>
+        </div>
+
+        <!-- Step 4: Review -->
+        <div id="step4" style="display:none;">
+            <h3>Review Ticket Details</h3>
+            <p>Please review your entered details before submitting.</p>
+            <!-- Render summary dynamically via JS -->
+            <button type="button" class="btn btn-secondary mt-2" onclick="nextStep(3)">Previous</button>
+            <button type="submit" class="btn btn-primary mt-2">Submit Ticket</button>
+        </div>
+    </form>
+}
+
+@section Scripts {
+    <script>
+        function nextStep(step) {
+            document.getElementById('step1').style.display = 'none';
+            document.getElementById('step2').style.display = 'none';
+            document.getElementById('step3').style.display = 'none';
+            document.getElementById('step4').style.display = 'none';
+            
+            document.getElementById('step' + step).style.display = 'block';
+        }
+    </script>
+}

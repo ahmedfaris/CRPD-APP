@@ -1,0 +1,72 @@
+@model List<EnterprisePortal.Web.Models.Employee>
+@{
+    ViewData["Title"] = "Staff Directory";
+}
+
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-6 border-b border-slate-800 gap-4">
+        <div>
+            <h1 class="text-2xl font-black text-white flex items-center space-x-3">
+                <i class="fa-solid fa-users text-purple-400"></i>
+                <span>Staff & Human Resources Directory</span>
+            </h1>
+            <p class="text-xs text-slate-400 mt-1">Official registry of organizational personnel, titles, skills, and status.</p>
+        </div>
+        <a asp-action="Create" class="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-lg shadow-purple-600/30 transition">
+            <i class="fa-solid fa-user-plus"></i>
+            <span>Register New Employee</span>
+        </a>
+    </div>
+
+    <!-- Table -->
+    <div class="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900 shadow-xl">
+        <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-950/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+                <tr>
+                    <th class="py-3 px-4">Staff Member</th>
+                    <th class="py-3 px-4">Department</th>
+                    <th class="py-3 px-4">Job Title</th>
+                    <th class="py-3 px-4">National ID</th>
+                    <th class="py-3 px-4">Status</th>
+                    <th class="py-3 px-4">Contact</th>
+                    <th class="py-3 px-4 text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800">
+                @foreach (var emp in Model)
+                {
+                    <tr class="hover:bg-slate-800/40 transition">
+                        <td class="py-3 px-4 font-semibold text-white">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-8 h-8 rounded-full bg-purple-600/30 border border-purple-500/40 text-purple-300 flex items-center justify-center font-bold text-xs">
+                                    @emp.FullName[0]
+                                </div>
+                                <div>
+                                    <div class="font-bold text-white">@emp.FullName</div>
+                                    <div class="text-[10px] font-mono text-slate-500">@emp.EmployeeBadgeId</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="py-3 px-4 text-slate-300 font-medium">@emp.Department</td>
+                        <td class="py-3 px-4 text-slate-400">@emp.JobTitle</td>
+                        <td class="py-3 px-4 font-mono text-slate-400">@emp.NationalId</td>
+                        <td class="py-3 px-4">
+                            <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                @emp.Status
+                            </span>
+                        </td>
+                        <td class="py-3 px-4 font-mono text-[11px] text-slate-400">
+                            <div>@emp.Email</div>
+                            <div class="text-slate-500">@emp.Phone</div>
+                        </td>
+                        <td class="py-3 px-4 text-right">
+                            <a asp-action="Details" asp-route-id="@emp.Id" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-semibold transition">
+                                Profile
+                            </a>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>

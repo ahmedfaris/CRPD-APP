@@ -1,0 +1,79 @@
+@model EnterprisePortal.Web.Models.LoginViewModel
+@{
+    ViewData["Title"] = "Secure Sign In";
+    Layout = "_Layout";
+}
+
+<div class="min-h-[calc(100vh-8rem)] flex items-center justify-center px-4 sm:px-6 lg:px-8 py-12">
+    <div class="max-w-md w-full space-y-8 bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl">
+        <div class="text-center">
+            <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center mx-auto shadow-lg shadow-blue-500/30 mb-4">
+                <i class="fa-solid fa-shield-halved text-white text-2xl"></i>
+            </div>
+            <h2 class="text-2xl font-black text-white tracking-tight">Enterprise Portal Access</h2>
+            <p class="text-xs text-slate-400 mt-2">
+                Sign in with your organization identity. Default administrator has direct access.
+            </p>
+        </div>
+
+        <form asp-controller="Account" asp-action="Login" method="post" class="mt-8 space-y-5">
+            <div asp-validation-summary="ModelOnly" class="p-3 bg-red-950/60 border border-red-800 rounded-lg text-red-300 text-xs"></div>
+
+            <input type="hidden" asp-for="ReturnUrl" />
+
+            <div>
+                <label asp-for="EmailOrUsername" class="block text-xs font-bold text-slate-300 mb-1">Work Email or Username</label>
+                <div class="relative">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
+                        <i class="fa-solid fa-envelope text-sm"></i>
+                    </div>
+                    <input asp-for="EmailOrUsername" class="block w-full pl-10 pr-3 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="admin@system.local" required />
+                </div>
+                <span asp-validation-for="EmailOrUsername" class="text-xs text-red-400"></span>
+            </div>
+
+            <div>
+                <label asp-for="Password" class="block text-xs font-bold text-slate-300 mb-1">Security Password</label>
+                <div class="relative">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
+                        <i class="fa-solid fa-lock text-sm"></i>
+                    </div>
+                    <input asp-for="Password" class="block w-full pl-10 pr-3 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="••••••••••••" required />
+                </div>
+                <span asp-validation-for="Password" class="text-xs text-red-400"></span>
+            </div>
+
+            <div class="flex items-center justify-between">
+                <label class="flex items-center space-x-2 text-xs text-slate-400 cursor-pointer">
+                    <input asp-for="RememberMe" class="rounded bg-slate-950 border-slate-700 text-blue-600 focus:ring-0" />
+                    <span>Trust this workstation</span>
+                </label>
+                <span class="text-[11px] text-blue-400 font-mono">5 Attempts Lockout</span>
+            </div>
+
+            <button type="submit" class="w-full py-3 px-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-sm transition shadow-lg shadow-blue-600/30 flex items-center justify-center space-x-2">
+                <span>Sign In to System</span>
+                <i class="fa-solid fa-arrow-right text-xs"></i>
+            </button>
+        </form>
+
+        <!-- Quick Demo Credentials helper box -->
+        <div class="mt-6 p-4 rounded-xl bg-slate-950/70 border border-slate-800 text-xs space-y-2">
+            <div class="font-bold text-slate-300 flex items-center justify-between">
+                <span>Pre-Configured Seed Accounts:</span>
+                <span class="text-[10px] text-emerald-400">Ready to Test</span>
+            </div>
+            <div class="space-y-1 text-slate-400 font-mono text-[11px]">
+                <div class="flex justify-between">
+                    <span class="text-purple-400">Admin (No 2FA):</span>
+                    <span>admin@system.local / Admin@2026!</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-emerald-400">Agent (2FA):</span>
+                    <span>sara.khalid@system.local / Agent@2026!</span>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>

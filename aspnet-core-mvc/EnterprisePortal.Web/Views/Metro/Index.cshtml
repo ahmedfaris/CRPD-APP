@@ -1,0 +1,196 @@
+@model EnterprisePortal.Web.Models.MetroHubViewModel
+@{
+    ViewData["Title"] = "Operations Hub";
+}
+
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+
+    <!-- Header Banner -->
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between pb-6 border-b border-slate-800 gap-4">
+        <div>
+            <div class="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-semibold mb-2">
+                <i class="fa-solid fa-shield-halved text-blue-400"></i>
+                <span>Protected Identity Session (Tolerance: ±@Model.ServerToleranceSeconds s)</span>
+            </div>
+            <h1 class="text-3xl font-black tracking-tight text-white">
+                Enterprise Operations <span class="text-blue-400">Portal</span>
+            </h1>
+            <p class="text-slate-400 text-sm mt-1">
+                Welcome, <span class="text-white font-medium">@Model.CurrentUser.FullName</span> (@Model.CurrentUser.JobTitle) • Unified ASP.NET Core MVC Platform
+            </p>
+        </div>
+
+        <div class="flex items-center space-x-3">
+            <span class="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-300 font-mono">
+                <i class="fa-solid fa-database text-emerald-400 mr-1.5"></i> EF Core / SQLite
+            </span>
+            <a asp-controller="Diagnostics" asp-action="Serilog" class="px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400 hover:bg-amber-500/20 font-semibold transition">
+                <i class="fa-solid fa-terminal mr-1.5"></i> Live Serilog
+            </a>
+        </div>
+    </div>
+
+    <!-- PRIMARY METRO TILES GRID -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+
+        <!-- TILE 1: TICKETS -->
+        <a asp-controller="Tickets" asp-action="Index" class="metro-tile block rounded-2xl bg-gradient-to-br from-blue-700 via-blue-800 to-indigo-950 p-6 shadow-xl border border-blue-600/40 hover:border-blue-400 group flex flex-col justify-between min-h-[250px]">
+            <div>
+                <div class="flex items-center justify-between">
+                    <div class="w-12 h-12 rounded-xl bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center text-white shadow-inner group-hover:scale-110 transition">
+                        <i class="fa-solid fa-ticket text-xl text-blue-200"></i>
+                    </div>
+                    <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-white/20 text-white backdrop-blur-xs">
+                        @Model.ActiveTicketsCount Active
+                    </span>
+                </div>
+                <div class="mt-5">
+                    <h2 class="text-xl font-bold text-white group-hover:text-blue-200 transition">Ticket Management</h2>
+                    <p class="text-xs text-blue-100/80 mt-2 line-clamp-2">Enterprise incident tracking, automated SLA deadlines, priority dispatch, and resolution workflows.</p>
+                </div>
+            </div>
+            <div class="pt-5 border-t border-white/10 flex items-center justify-between text-xs font-semibold text-white">
+                <span class="text-blue-200"><i class="fa-solid fa-clock mr-1 text-emerald-300"></i> SLA Tracked</span>
+                <span class="group-hover:translate-x-1 transition flex items-center space-x-1">
+                    <span>Open System</span>
+                    <i class="fa-solid fa-chevron-right text-[10px]"></i>
+                </span>
+            </div>
+        </a>
+
+        <!-- TILE 2: ARCHIVING -->
+        <a asp-controller="Archiving" asp-action="Index" class="metro-tile block rounded-2xl bg-gradient-to-br from-emerald-700 via-teal-800 to-emerald-950 p-6 shadow-xl border border-emerald-600/40 hover:border-emerald-400 group flex flex-col justify-between min-h-[250px]">
+            <div>
+                <div class="flex items-center justify-between">
+                    <div class="w-12 h-12 rounded-xl bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center text-white shadow-inner group-hover:scale-110 transition">
+                        <i class="fa-solid fa-box-archive text-xl text-emerald-200"></i>
+                    </div>
+                    <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-white/20 text-white backdrop-blur-xs">
+                        @Model.ArchivedDocumentsCount Records
+                    </span>
+                </div>
+                <div class="mt-5">
+                    <h2 class="text-xl font-bold text-white group-hover:text-emerald-200 transition">Document Archiving</h2>
+                    <p class="text-xs text-emerald-100/80 mt-2 line-clamp-2">Digital vault, QRCoder barcode generation, legal retention terms, and SHA-256 digital seals.</p>
+                </div>
+            </div>
+            <div class="pt-5 border-t border-white/10 flex items-center justify-between text-xs font-semibold text-white">
+                <span class="text-emerald-200"><i class="fa-solid fa-qrcode mr-1 text-cyan-300"></i> Barcode Verified</span>
+                <span class="group-hover:translate-x-1 transition flex items-center space-x-1">
+                    <span>Open Vault</span>
+                    <i class="fa-solid fa-chevron-right text-[10px]"></i>
+                </span>
+            </div>
+        </a>
+
+        <!-- TILE 3: EMPLOYEES -->
+        <a asp-controller="Employees" asp-action="Index" class="metro-tile block rounded-2xl bg-gradient-to-br from-purple-700 via-violet-800 to-indigo-950 p-6 shadow-xl border border-purple-600/40 hover:border-purple-400 group flex flex-col justify-between min-h-[250px]">
+            <div>
+                <div class="flex items-center justify-between">
+                    <div class="w-12 h-12 rounded-xl bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center text-white shadow-inner group-hover:scale-110 transition">
+                        <i class="fa-solid fa-users text-xl text-purple-200"></i>
+                    </div>
+                    <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-white/20 text-white backdrop-blur-xs">
+                        @Model.EmployeesCount Personnel
+                    </span>
+                </div>
+                <div class="mt-5">
+                    <h2 class="text-xl font-bold text-white group-hover:text-purple-200 transition">Personnel & HR</h2>
+                    <p class="text-xs text-purple-100/80 mt-2 line-clamp-2">Organization directory, employee profiles, department assignment, leaves, and payroll records.</p>
+                </div>
+            </div>
+            <div class="pt-5 border-t border-white/10 flex items-center justify-between text-xs font-semibold text-white">
+                <span class="text-purple-200"><i class="fa-solid fa-id-card mr-1 text-amber-300"></i> HRIS Directory</span>
+                <span class="group-hover:translate-x-1 transition flex items-center space-x-1">
+                    <span>Directory</span>
+                    <i class="fa-solid fa-chevron-right text-[10px]"></i>
+                </span>
+            </div>
+        </a>
+
+        <!-- TILE 4: USER POLICY & 2FA CONTROL -->
+        <a asp-controller="UserPolicy" asp-action="Index" class="metro-tile block rounded-2xl bg-gradient-to-br from-cyan-800 via-slate-800 to-slate-950 p-6 shadow-xl border border-cyan-600/40 hover:border-cyan-400 group flex flex-col justify-between min-h-[250px]">
+            <div>
+                <div class="flex items-center justify-between">
+                    <div class="w-12 h-12 rounded-xl bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center text-white shadow-inner group-hover:scale-110 transition">
+                        <i class="fa-solid fa-sliders text-xl text-cyan-200"></i>
+                    </div>
+                    <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-cyan-500/20 text-cyan-200 border border-cyan-500/30">
+                        Admin Policy
+                    </span>
+                </div>
+                <div class="mt-5">
+                    <h2 class="text-xl font-bold text-white group-hover:text-cyan-200 transition">Policy & 2FA Control</h2>
+                    <p class="text-xs text-slate-300 mt-2 line-clamp-2">Selective 2FA toggles, secret regeneration, clock drift tolerance (±30s/60s/90s), and lockout management.</p>
+                </div>
+            </div>
+            <div class="pt-5 border-t border-white/10 flex items-center justify-between text-xs font-semibold text-white">
+                <span class="text-cyan-300"><i class="fa-solid fa-shield-check mr-1 text-cyan-400"></i> @Model.UsersWith2FACount/@Model.UsersCount Protected</span>
+                <span class="group-hover:translate-x-1 transition flex items-center space-x-1">
+                    <span>Manage</span>
+                    <i class="fa-solid fa-chevron-right text-[10px]"></i>
+                </span>
+            </div>
+        </a>
+
+    </div>
+
+    <!-- STATUS INFO CARDS -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4">
+
+        <div class="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-slate-300 flex items-center space-x-2">
+                    <i class="fa-solid fa-lock text-emerald-400"></i>
+                    <span>Authentication Policy Status</span>
+                </span>
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed">
+                @(Model.Global2FAEnforced ? "Strict mode: 2FA enforced for all user accounts." : "Selective policy: Default Admin is direct password sign-in (2FA Bypassed). Per-user toggles are enabled.")
+            </p>
+            <div class="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                <span class="text-cyan-400">Admin 2FA: Bypassed</span>
+                <span class="text-emerald-400">Tolerance: ±@Model.ServerToleranceSeconds s</span>
+            </div>
+        </div>
+
+        <div class="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-slate-300 flex items-center space-x-2">
+                    <i class="fa-solid fa-server text-blue-400"></i>
+                    <span>ASP.NET Core Identity Session</span>
+                </span>
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    Active
+                </span>
+            </div>
+            <p class="text-xs text-slate-400 truncate">
+                @Model.CurrentUser.Department • @Model.CurrentUser.Email
+            </p>
+            <div class="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                <span>Identity: Cookie Auth</span>
+                <span class="text-blue-400">8h Expiry</span>
+            </div>
+        </div>
+
+        <div class="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-slate-300 flex items-center space-x-2">
+                    <i class="fa-solid fa-microchip text-amber-400"></i>
+                    <span>Serilog Diagnostics</span>
+                </span>
+                <span class="text-[10px] font-mono text-slate-500">v8.0.2</span>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed">
+                Structured logging enabled. Sinks write to Console and daily rolling files in <span class="font-mono text-slate-300">Logs/</span> directory.
+            </p>
+            <div class="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                <span>Sink: Rolling File</span>
+                <span class="text-amber-400">Information</span>
+            </div>
+        </div>
+
+    </div>
+
+</div>

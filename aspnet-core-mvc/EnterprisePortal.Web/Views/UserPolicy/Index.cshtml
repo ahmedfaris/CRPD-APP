@@ -1,0 +1,187 @@
+@model EnterprisePortal.Web.Models.UserPolicyViewModel
+@{
+    ViewData["Title"] = "User Security & 2FA Policy Control";
+}
+
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-6 border-b border-slate-800 gap-4">
+        <div>
+            <h1 class="text-2xl font-black text-white flex items-center space-x-3">
+                <i class="fa-solid fa-sliders text-cyan-400"></i>
+                <span>User Security & 2FA Policy Control</span>
+            </h1>
+            <p class="text-xs text-slate-400 mt-1">Configure multi-factor authentication policies, TOTP clock tolerances, and account statuses.</p>
+        </div>
+        <div class="flex items-center space-x-3">
+            <form asp-action="ToggleGlobal2FA" method="post">
+                @if (Model.Global2FAEnforced)
+                {
+                    <button type="submit" class="px-4 py-2 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 text-xs font-bold transition flex items-center space-x-2">
+                        <i class="fa-solid fa-lock"></i>
+                        <span>Strict Global 2FA: ACTIVE</span>
+                    </button>
+                }
+                else
+                {
+                    <button type="submit" class="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 text-xs font-bold transition flex items-center space-x-2">
+                        <i class="fa-solid fa-toggle-off"></i>
+                        <span>Selective 2FA Policy (Admin Bypassed)</span>
+                    </button>
+                }
+            </form>
+        </div>
+    </div>
+
+    <!-- Metrics Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div class="p-5 rounded-2xl bg-slate-900 border border-slate-800">
+            <span class="text-xs text-slate-400 block font-semibold">Total Accounts</span>
+            <span class="text-3xl font-black text-white mt-1 block">@Model.TotalUsersCount</span>
+            <span class="text-[11px] text-slate-500 mt-1 block font-mono">ASP.NET Identity</span>
+        </div>
+        <div class="p-5 rounded-2xl bg-slate-900 border border-slate-800">
+            <span class="text-xs text-slate-400 block font-semibold">2FA Protected</span>
+            <span class="text-3xl font-black text-cyan-400 mt-1 block">@Model.TwoFactorActiveCount</span>
+            <span class="text-[11px] text-cyan-500/80 mt-1 block font-mono">RFC 6238 TOTP</span>
+        </div>
+        <div class="p-5 rounded-2xl bg-slate-900 border border-slate-800">
+            <span class="text-xs text-slate-400 block font-semibold">Direct Password (No 2FA)</span>
+            <span class="text-3xl font-black text-slate-300 mt-1 block">@Model.TwoFactorDisabledCount</span>
+            <span class="text-[11px] text-amber-500/80 mt-1 block font-mono">Includes Default Admin</span>
+        </div>
+        <div class="p-5 rounded-2xl bg-slate-900 border border-slate-800">
+            <span class="text-xs text-slate-400 block font-semibold">Clock Tolerance</span>
+            <span class="text-3xl font-black text-emerald-400 mt-1 block">±@Model.ServerToleranceSeconds s</span>
+            <span class="text-[11px] text-emerald-500/80 mt-1 block font-mono">Step: 30s</span>
+        </div>
+    </div>
+
+    <!-- Clock Tolerance Adjuster Form -->
+    <div class="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h3 class="text-sm font-bold text-white flex items-center space-x-2">
+                <i class="fa-solid fa-clock text-emerald-400"></i>
+                <span>TOTP Server Verification Tolerance Window</span>
+            </h3>
+            <p class="text-xs text-slate-400 mt-1">Controls how many previous and future 30-second steps are accepted to compensate for device time skew.</p>
+        </div>
+        <div class="flex items-center space-x-2">
+            <form asp-action="SetTolerance" method="post" class="flex space-x-2">
+                <input type="hidden" name="seconds" value="30" />
+                <button type="submit" class="px-3 py-1.5 rounded-lg text-xs font-bold @(Model.ServerToleranceSeconds == 30 ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700")">
+                    ±30s (1 Step)
+                </button>
+            </form>
+            <form asp-action="SetTolerance" method="post" class="flex space-x-2">
+                <input type="hidden" name="seconds" value="60" />
+                <button type="submit" class="px-3 py-1.5 rounded-lg text-xs font-bold @(Model.ServerToleranceSeconds == 60 ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700")">
+                    ±60s (Standard 1m)
+                </button>
+            </form>
+            <form asp-action="SetTolerance" method="post" class="flex space-x-2">
+                <input type="hidden" name="seconds" value="90" />
+                <button type="submit" class="px-3 py-1.5 rounded-lg text-xs font-bold @(Model.ServerToleranceSeconds == 90 ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700")">
+                    ±90s (Extended)
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Users Policy Table -->
+    <div class="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900 shadow-xl">
+        <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-950/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+                <tr>
+                    <th class="py-3 px-4">User Identity</th>
+                    <th class="py-3 px-4">Department</th>
+                    <th class="py-3 px-4">Current 2FA Status</th>
+                    <th class="py-3 px-4">Lockout Status</th>
+                    <th class="py-3 px-4">Secret Status</th>
+                    <th class="py-3 px-4 text-right">Policy Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800">
+                @foreach (var user in Model.Users)
+                {
+                    bool isLocked = user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTimeOffset.UtcNow;
+                    bool has2FA = Model.Global2FAEnforced || user.TwoFactorEnabled;
+
+                    <tr class="hover:bg-slate-800/40 transition">
+                        <td class="py-3 px-4">
+                            <div class="font-bold text-white">@user.FullName</div>
+                            <div class="text-[11px] font-mono text-slate-400">@user.Email</div>
+                        </td>
+                        <td class="py-3 px-4">
+                            <div>@user.Department</div>
+                            <div class="text-[10px] text-slate-500">@user.JobTitle</div>
+                        </td>
+                        <td class="py-3 px-4">
+                            @if (has2FA)
+                            {
+                                <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                                    <i class="fa-solid fa-shield-check mr-1"></i> Enabled
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700">
+                                    <i class="fa-solid fa-shield-slash mr-1"></i> Disabled (Direct)
+                                </span>
+                            }
+                        </td>
+                        <td class="py-3 px-4">
+                            @if (isLocked)
+                            {
+                                <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-300 border border-red-500/30">
+                                    Locked until @user.LockoutEnd!.Value.ToString("HH:mm")
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="text-slate-500 text-[11px]">Normal</span>
+                            }
+                        </td>
+                        <td class="py-3 px-4 font-mono text-[11px]">
+                            @if (!string.IsNullOrEmpty(user.TwoFactorSecret))
+                            {
+                                <span class="text-emerald-400">Configured</span>
+                            }
+                            else
+                            {
+                                <span class="text-slate-500">Unregistered</span>
+                            }
+                        </td>
+                        <td class="py-3 px-4 text-right space-x-2">
+                            <!-- Toggle 2FA Button -->
+                            <form asp-action="ToggleUser2FA" method="post" class="inline">
+                                <input type="hidden" name="userId" value="@user.Id" />
+                                <button type="submit" class="px-2.5 py-1 rounded text-[11px] font-bold transition @(user.TwoFactorEnabled ? "bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20" : "bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 hover:bg-cyan-500/20")">
+                                    @(user.TwoFactorEnabled ? "Disable 2FA" : "Enable 2FA")
+                                </button>
+                            </form>
+
+                            <!-- Reset Secret Button -->
+                            <form asp-action="ResetUser2FASecret" method="post" class="inline">
+                                <input type="hidden" name="userId" value="@user.Id" />
+                                <button type="submit" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] transition" title="Force user to re-scan barcode on next login">
+                                    <i class="fa-solid fa-qrcode mr-1"></i> Reset Secret
+                                </button>
+                            </form>
+
+                            <!-- Unlock if locked -->
+                            @if (isLocked)
+                            {
+                                <form asp-action="UnlockUser" method="post" class="inline">
+                                    <input type="hidden" name="userId" value="@user.Id" />
+                                    <button type="submit" class="px-2 py-1 rounded bg-amber-600/20 text-amber-300 border border-amber-600/30 text-[11px] font-bold">
+                                        Unlock
+                                    </button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
