@@ -389,7 +389,7 @@ export function UserPolicyControlView({ onBackToHub }: UserPolicyControlViewProp
               <tbody className="divide-y divide-slate-200 dark:divide-slate-800/60">
                 {filteredUsers.map((user) => {
                   const isEffective2FA = global2FAEnforced || !!user.twoFactorEnabled;
-                  const hasSecret = !!user.twoFactorSecret;
+                  const hasSecret = !!(user.hasTwoFactorSecret || user.twoFactorSecret);
                   const isCurrentUser = currentUser?.id === user.id;
 
                   return (

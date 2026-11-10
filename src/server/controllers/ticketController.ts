@@ -12,63 +12,20 @@ function getParam(val: string | string[] | undefined): string {
 
 export class TicketController {
   /**
-   * Helper to extract active actor from AuthRequest or body/headers
+   * Resolve the acting user from the verified session token only.
+   * Client-supplied identity (req.body.actor, x-user-* headers) is ignored, since
+   * trusting it would let any caller act as any user or role.
    */
   private static getActor(req: AuthRequest) {
-    // 1. Check request body for client-provided actor context (e.g. active user in UI)
-    if (req.body?.actor && (req.body.actor.id || req.body.actor.uid || req.body.actor.email)) {
-      return {
-        uid: String(req.body.actor.uid || req.body.actor.id || 'usr_current'),
-        id: String(req.body.actor.id || req.body.actor.uid || 'usr_current'),
-        fullName: req.body.actor.fullName || req.body.actor.name || 'System User',
-        email: req.body.actor.email || 'user@company.gov',
-        role: req.body.actor.role || 'Employee',
-        userType: req.body.actor.userType || 'Operational User',
-        department: req.body.actor.department || 'IT Service Desk',
-      };
-    }
-
-    // 2. Check custom active user headers
-    const headerUserId = req.headers['x-user-id'] as string;
-    const headerUserName = req.headers['x-user-name'] as string;
-    const headerUserEmail = req.headers['x-user-email'] as string;
-    const headerUserRole = req.headers['x-user-role'] as string;
-    const headerUserType = req.headers['x-user-type'] as string;
-    const headerUserDept = req.headers['x-user-dept'] as string;
-
-    if (headerUserId || headerUserName || headerUserEmail) {
-      return {
-        uid: headerUserId || 'usr_guest',
-        id: headerUserId || 'usr_guest',
-        fullName: headerUserName ? decodeURIComponent(headerUserName) : 'System User',
-        email: headerUserEmail || 'user@company.gov',
-        role: headerUserRole || 'Employee',
-        userType: headerUserType || 'Operational User',
-        department: headerUserDept ? decodeURIComponent(headerUserDept) : 'IT Service Desk',
-      };
-    }
-
-    // 3. Fallback to JWT session user
-    if (req.user) {
-      return {
-        uid: String(req.user.uid || req.user.id || 'usr_current'),
-        id: String(req.user.id || req.user.uid || 'usr_current'),
-        fullName: req.user.fullName || req.user.displayName || req.user.name || 'System User',
-        email: req.user.email || 'user@company.gov',
-        role: req.user.role || 'Employee',
-        userType: req.user.userType || (req.user.role === 'Admin' ? 'System Admin' : req.user.role === 'Agent' ? 'Technical' : 'Operational User'),
-        department: req.user.department || 'IT Service Desk',
-      };
-    }
-
+    const u = req.user || {};
     return {
-      uid: 'USR-OPERATIONAL-001',
-      id: 'USR-OPERATIONAL-001',
-      fullName: 'System Operator',
-      email: 'operator@company.gov',
-      role: 'Admin',
-      userType: 'System Admin',
-      department: 'IT Service Desk',
+      uid: String(u.uid || u.id || u.sub || ''),
+      id: String(u.id || u.uid || u.sub || ''),
+      fullName: u.fullName || u.displayName || u.name || u.email || 'User',
+      email: u.email || '',
+      role: u.role || 'Employee',
+      userType: u.userType || (u.role === 'Admin' ? 'System Admin' : u.role === 'Agent' ? 'Technical' : 'Operational User'),
+      department: u.department || 'Unassigned',
     };
   }
 

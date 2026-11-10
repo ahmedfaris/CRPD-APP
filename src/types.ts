@@ -312,6 +312,8 @@ export interface ApplicationUser {
   mustChangePassword: boolean;
   twoFactorEnabled?: boolean;
   twoFactorSecret?: string;
+  /** Server-provided flag: true when a 2FA secret is enrolled (the secret itself is never sent). */
+  hasTwoFactorSecret?: boolean;
   createdAt: string;
   lastActiveAt: string;
   avatarColor: string;

@@ -7,6 +7,7 @@ import { SessionManager } from '../services/sessionManager.ts';
 import { UserModel } from '../models/userModel.ts';
 import { TicketModel } from '../models/ticketModel.ts';
 import { isUserTechnical } from '../../types.ts';
+import { toPublicUser } from '../utils/publicUser.ts';
 
 const colors = [
   'bg-blue-600', 'bg-emerald-600', 'bg-rose-600', 'bg-amber-600',
@@ -19,7 +20,7 @@ export class UserController {
   static async getAllUsers(req: AuthRequest, res: Response) {
     try {
       const allUsers = await UserModel.getAllUsers();
-      res.status(200).json({ success: true, data: allUsers });
+      res.status(200).json({ success: true, data: allUsers.map((u) => toPublicUser(u)) });
     } catch (error: any) {
       console.error('UserController.getAllUsers error:', error);
       res.status(500).json({ success: false, error: 'Failed to fetch users' });
@@ -119,7 +120,7 @@ export class UserController {
         AdminUser: req.user?.name || req.user?.email || 'System',
         Action: 'CreateUser'
       });
-      res.status(201).json({ success: true, data: newUser });
+      res.status(201).json({ success: true, data: toPublicUser(newUser) });
     } catch (error: any) {
       console.error('UserController.createUser error:', error);
       res.status(500).json({ success: false, error: error.message || 'Failed to create user' });
@@ -260,7 +261,7 @@ export class UserController {
           AdminUser: adminEmail,
           Action: 'EditUser'
         });
-        res.status(200).json({ success: true, data: updated });
+        res.status(200).json({ success: true, data: toPublicUser(updated) });
       } else {
         res.status(404).json({ success: false, error: 'User not found.' });
       }

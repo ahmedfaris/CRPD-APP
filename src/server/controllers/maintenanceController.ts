@@ -25,15 +25,16 @@ export class MaintenanceController {
         department: req.user.department || 'IT Service Desk',
       };
     }
-    if (req.body?.actor) return req.body.actor;
+    // Routes are behind requireAuth, so req.user is always set. Never fall back to a
+    // client-supplied actor or a default admin identity.
     return {
-      uid: 'admin_uid_seed',
-      id: 'admin_uid_seed',
-      fullName: 'System Administrator',
-      email: 'admin@system.local',
-      role: 'Admin',
-      userType: 'System Admin',
-      department: 'Information Technology',
+      uid: '',
+      id: '',
+      fullName: 'Unknown User',
+      email: '',
+      role: 'Employee',
+      userType: 'Operational User',
+      department: 'Unassigned',
     };
   }
 

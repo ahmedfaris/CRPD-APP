@@ -24,17 +24,6 @@ export async function apiFetch(input: RequestInfo | URL, init: ApiFetchInit = {}
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  // Also include user context headers for local dev/preview
-  try {
-    const savedUser = localStorage.getItem('auth_user_cache');
-    if (savedUser) {
-      const u = JSON.parse(savedUser);
-      if (u.email && !headers.has('x-user-email')) headers.set('x-user-email', u.email);
-      if (u.id && !headers.has('x-user-id')) headers.set('x-user-id', String(u.id));
-      if (u.role && !headers.has('x-user-role')) headers.set('x-user-role', u.role);
-    }
-  } catch (_) {}
-
   const response = await fetch(input, {
     ...init,
     credentials: 'include', // Ensures HttpOnly Secure session cookies are always transmitted

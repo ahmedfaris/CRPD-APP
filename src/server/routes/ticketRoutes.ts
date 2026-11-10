@@ -1,71 +1,36 @@
 // src/server/routes/ticketRoutes.ts
-import { Router, Response, NextFunction } from 'express';
-import { AuthRequest } from '../../middleware/auth.ts';
+import { Router } from 'express';
+import { requireAuth } from '../../middleware/auth.ts';
 import { TicketController } from '../controllers/ticketController.ts';
-import jwt from 'jsonwebtoken';
-import { SESSION_COOKIE_NAME } from '../services/sessionManager.ts';
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-fallback-key';
-
-/**
- * Flexible authentication middleware for Tickets API
- * Extracts token from Authorization header or session cookie,
- * falling back gracefully in dev/preview if needed.
- */
-const optionalOrRequiredAuth = async (req: AuthRequest, res: Response, next: NextFunction) => {
-  let token: string | undefined;
-
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    token = authHeader.split('Bearer ')[1];
-  } else if (req.cookies && req.cookies[SESSION_COOKIE_NAME]) {
-    token = req.cookies[SESSION_COOKIE_NAME];
-  }
-
-  if (token) {
-    try {
-      const decoded: any = jwt.verify(token, JWT_SECRET);
-      req.user = decoded;
-      req.sessionId = decoded.sessionId;
-    } catch (_) {
-      // Decode without verification if fallback key differed
-      const decodedFallback = jwt.decode(token);
-      if (decodedFallback && typeof decodedFallback === 'object') {
-        req.user = decodedFallback;
-      }
-    }
-  }
-
-  next();
-};
 
 // ==========================================
 // Ticket Management Routes
 // ==========================================
 
 // Metric & Settings Endpoints (Must precede parameterized /:id)
-router.get('/metrics', optionalOrRequiredAuth, TicketController.getMetrics);
-router.get('/settings', optionalOrRequiredAuth, TicketController.getSettings);
-router.put('/settings', optionalOrRequiredAuth, TicketController.updateSettings);
+router.get('/metrics', requireAuth, TicketController.getMetrics);
+router.get('/settings', requireAuth, TicketController.getSettings);
+router.put('/settings', requireAuth, TicketController.updateSettings);
 
 // Support Team Endpoints
-router.get('/teams', optionalOrRequiredAuth, TicketController.getTeams);
-router.post('/teams', optionalOrRequiredAuth, TicketController.createTeam);
-router.put('/teams/:teamId', optionalOrRequiredAuth, TicketController.updateTeam);
-router.delete('/teams/:teamId', optionalOrRequiredAuth, TicketController.deleteTeam);
-router.post('/teams/:teamId/members', optionalOrRequiredAuth, TicketController.assignUserToTeam);
-router.delete('/teams/:teamId/members/:userId', optionalOrRequiredAuth, TicketController.removeUserFromTeam);
+router.get('/teams', requireAuth, TicketController.getTeams);
+router.post('/teams', requireAuth, TicketController.createTeam);
+router.put('/teams/:teamId', requireAuth, TicketController.updateTeam);
+router.delete('/teams/:teamId', requireAuth, TicketController.deleteTeam);
+router.post('/teams/:teamId/members', requireAuth, TicketController.assignUserToTeam);
+router.delete('/teams/:teamId/members/:userId', requireAuth, TicketController.removeUserFromTeam);
 
 // Core Ticket CRUD Endpoints
-router.get('/', optionalOrRequiredAuth, TicketController.getAllTickets);
-router.post('/', optionalOrRequiredAuth, TicketController.createTicket);
-router.get('/:id', optionalOrRequiredAuth, TicketController.getTicketById);
-router.put('/:id', optionalOrRequiredAuth, TicketController.updateTicket);
-router.delete('/:id', optionalOrRequiredAuth, TicketController.deleteTicket);
+router.get('/', requireAuth, TicketController.getAllTickets);
+router.post('/', requireAuth, TicketController.createTicket);
+router.get('/:id', requireAuth, TicketController.getTicketById);
+router.put('/:id', requireAuth, TicketController.updateTicket);
+router.delete('/:id', requireAuth, TicketController.deleteTicket);
 
 // Comment & Attachment Endpoints
-router.post('/:id/comments', optionalOrRequiredAuth, TicketController.addComment);
-router.post('/:id/attachments', optionalOrRequiredAuth, TicketController.addAttachment);
+router.post('/:id/comments', requireAuth, TicketController.addComment);
+router.post('/:id/attachments', requireAuth, TicketController.addAttachment);
 
 export default router;

@@ -2,6 +2,7 @@
 import { Router, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
+import { requireAuth } from '../../middleware/auth.ts';
 import { 
   TICKET_REQUESTS_DIR, 
   TICKET_REQUESTS_FOLDER_NAME,
@@ -11,6 +12,9 @@ import {
 } from '../services/ticketRequestFileService.ts';
 
 const router = Router();
+
+// Ticket request files contain internal request details; only signed-in users may access them.
+router.use(requireAuth);
 
 /**
  * MIME type lookup based on file extension

@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { requireAuth, AuthRequest } from '../../middleware/auth.ts';
+import { requireAuth, requirePermission, getEffectivePermissions, AuthRequest } from '../../middleware/auth.ts';
+import { toPublicUser } from '../utils/publicUser.ts';
 import { getOrCreateUser } from '../../db/users.ts';
 import { db } from '../../db/index.ts';
 import { users, roles } from '../../db/schema.ts';
@@ -16,7 +17,7 @@ import {
 } from '../services/sessionManager.ts';
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-fallback-key';
+import { JWT_SECRET } from '../utils/jwtSecret.ts';
 
 // Define the maximum failed attempts and progressive lockout durations:
 // 1st lock: 5 minutes | 2nd lock: 10 minutes | 3rd lock: 15 minutes
@@ -56,6 +57,19 @@ interface RateLimitRecord {
   resetTime: number;
 }
 const ipLoginAttempts = new Map<string, RateLimitRecord>();
+const TWO_FACTOR_CHALLENGE_TTL = '5m';
+
+/**
+ * Client IP for rate limiting. X-Forwarded-For is client-controlled, so it is only
+ * honoured when the app is explicitly deployed behind a trusted reverse proxy.
+ */
+function getClientIp(req: any): string {
+  if (process.env.TRUST_PROXY === 'true') {
+    const forwarded = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim();
+    if (forwarded) return forwarded;
+  }
+  return req.socket?.remoteAddress || 'unknown';
+}
 const IP_RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute window
 const IP_MAX_REQUESTS_PER_WINDOW = 30; // 30 requests per minute per IP
 
@@ -74,10 +88,17 @@ function checkIpRateLimit(ip: string): { allowed: boolean; retryAfterSeconds?: n
   return { allowed: true };
 }
 
+/** A user may manage their own 2FA; managing anyone else's requires 'users.update'. */
+async function canManageUser(req: AuthRequest, targetUid: unknown): Promise<boolean> {
+  if (targetUid && req.user?.uid && String(targetUid) === String(req.user.uid)) return true;
+  const effective = await getEffectivePermissions(req.user?.uid);
+  return !!effective && (effective.permissions.includes('*') || effective.permissions.includes('users.update'));
+}
+
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
   try {
-    const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || 'unknown';
+    const clientIp = getClientIp(req);
     const rateLimit = checkIpRateLimit(clientIp);
     if (!rateLimit.allowed) {
       logger.warning('Rate limit exceeded for IP {ClientIp} on login endpoint', {
@@ -173,15 +194,10 @@ router.post('/login', async (req, res) => {
     let passwordMatch = false;
     const cleanPassword = (password || '').trim();
 
+    // Accounts without a password hash cannot sign in with a password. (Previously any
+    // such account accepted a hard-coded default password, which was a backdoor.)
     if (user.passwordHash) {
       passwordMatch = await bcrypt.compare(password, user.passwordHash) || await bcrypt.compare(cleanPassword, user.passwordHash);
-    } else {
-      // User has no passwordHash yet (freshly created unhashed user), only verify against default initial credential
-      if (cleanPassword === 'Admin@2026!') {
-        passwordMatch = true;
-        const hash = await bcrypt.hash(cleanPassword, 10);
-        await db.update(users).set({ passwordHash: hash }).where(eq(users.id, user.id));
-      }
     }
 
     if (!passwordMatch) {
@@ -289,11 +305,26 @@ router.post('/login', async (req, res) => {
         }
       }
 
+      // The password step is proven by a short-lived signed challenge token. verify-2fa
+      // requires it, so the 6-digit code alone can never create a session. For first-time
+      // enrolment the generated secret travels inside this signed token, not from the client.
+      const challengeToken = jwt.sign(
+        {
+          purpose: '2fa',
+          uid: user.uid,
+          ...(isFirstTime2FA ? { pendingSecret: secretToUse } : {})
+        },
+        JWT_SECRET,
+        { expiresIn: TWO_FACTOR_CHALLENGE_TTL, algorithm: 'HS256' }
+      );
+
       return res.json({
         success: true,
         requires2FA: true,
         isFirstTime2FA,
-        twoFactorSecret: secretToUse,
+        challengeToken,
+        // Only reveal a secret when it is being enrolled for the first time (needed for the QR code).
+        ...(isFirstTime2FA ? { twoFactorSecret: secretToUse } : {}),
         user: {
           id: String(user.id),
           uid: user.uid,
@@ -304,7 +335,6 @@ router.post('/login', async (req, res) => {
           role: user.role,
           userType: user.userType,
           twoFactorEnabled: true,
-          twoFactorSecret: user.twoFactorSecret || undefined,
           avatarColor: user.avatarColor || 'bg-blue-600 text-white',
           mustChangePassword: user.mustChangePassword || false,
           rolePermissions
@@ -321,6 +351,7 @@ router.post('/login', async (req, res) => {
     // Create managed session (enforces single computer concurrent login policy & timeouts)
     const sessionInfo = await SessionManager.createSession(
       { 
+        id: user.id,
         uid: user.uid, 
         email: user.email, 
         fullName: user.fullName, 
@@ -355,7 +386,7 @@ router.post('/login', async (req, res) => {
       sessionId: sessionInfo.sessionId,
       expiresAt: sessionInfo.expiresAt,
       user: {
-        ...user,
+        ...toPublicUser(user),
         rolePermissions
       }
     });
@@ -369,10 +400,29 @@ router.post('/login', async (req, res) => {
 // Strictly verifies the RFC 6238 TOTP code entered from an Authenticator app
 router.post('/verify-2fa', async (req, res) => {
   try {
-    const { email, code, secret } = req.body;
+    const clientIp = getClientIp(req);
+    const rateLimit = checkIpRateLimit(clientIp);
+    if (!rateLimit.allowed) {
+      return res.status(429).json({
+        success: false,
+        error: `Too many verification attempts. Please wait ${rateLimit.retryAfterSeconds} second(s) before trying again.`
+      });
+    }
 
-    if (!email || !code) {
-      return res.status(400).json({ success: false, error: 'Email and 6-digit authenticator code are required.' });
+    const { code, challengeToken } = req.body;
+
+    if (!challengeToken || !code) {
+      return res.status(400).json({ success: false, error: 'Sign-in challenge and 6-digit authenticator code are required.' });
+    }
+
+    let challenge: any;
+    try {
+      challenge = jwt.verify(String(challengeToken), JWT_SECRET, { algorithms: ['HS256'] });
+    } catch (_) {
+      return res.status(401).json({ success: false, error: 'Your sign-in attempt has expired. Please log in again.', code: 'CHALLENGE_EXPIRED' });
+    }
+    if (!challenge || challenge.purpose !== '2fa' || !challenge.uid) {
+      return res.status(401).json({ success: false, error: 'Invalid sign-in challenge. Please log in again.', code: 'CHALLENGE_INVALID' });
     }
 
     const cleanCode = String(code).trim().replace(/\s+/g, '');
@@ -380,13 +430,17 @@ router.post('/verify-2fa', async (req, res) => {
       return res.status(400).json({ success: false, error: 'The code must be exactly 6 digits from your authenticator app.' });
     }
 
-    const [user] = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
+    const [user] = await db.select().from(users).where(eq(users.uid, String(challenge.uid)));
     if (!user) {
-      return res.status(404).json({ success: false, error: 'User account not found.' });
+      return res.status(401).json({ success: false, error: 'Invalid sign-in challenge. Please log in again.', code: 'CHALLENGE_INVALID' });
+    }
+    if (user.isLockedOut) {
+      return res.status(403).json({ success: false, error: 'This account is locked. Please try again later.' });
     }
 
-    // Determine the secret: either already enrolled in DB, or passed during first-time enrollment
-    const activeSecret = user.twoFactorSecret || secret;
+    // Determine the secret: the enrolled one in the DB, or (first-time enrolment only)
+    // the server-generated secret carried in the signed challenge token.
+    const activeSecret = user.twoFactorSecret || challenge.pendingSecret;
     if (!activeSecret) {
       return res.status(400).json({ success: false, error: 'No 2FA configuration found for this account.' });
     }
@@ -428,6 +482,7 @@ router.post('/verify-2fa', async (req, res) => {
     // Issue session and token upon successful 2FA verification (enforcing single computer policy)
     const sessionInfo = await SessionManager.createSession(
       { 
+        id: updatedUser.id,
         uid: updatedUser.uid, 
         email: updatedUser.email, 
         fullName: updatedUser.fullName, 
@@ -475,7 +530,6 @@ router.post('/verify-2fa', async (req, res) => {
         role: updatedUser.role,
         userType: updatedUser.userType,
         twoFactorEnabled: updatedUser.twoFactorEnabled || false,
-        twoFactorSecret: updatedUser.twoFactorSecret || undefined,
         avatarColor: updatedUser.avatarColor || 'bg-blue-600 text-white',
         mustChangePassword: updatedUser.mustChangePassword || false,
         rolePermissions
@@ -493,6 +547,9 @@ router.post('/verify-2fa', async (req, res) => {
 // POST /api/auth/reset-2fa
 router.post('/reset-2fa', requireAuth, async (req: AuthRequest, res) => {
   try {
+    if (!(await canManageUser(req, req.body?.userId))) {
+      return res.status(403).json({ success: false, error: "Forbidden: requires 'users.update' permission.", code: 'FORBIDDEN' });
+    }
     const { userId } = req.body;
     if (!userId) {
       return res.status(400).json({ success: false, error: 'User identifier is required.' });
@@ -509,7 +566,7 @@ router.post('/reset-2fa', requireAuth, async (req: AuthRequest, res) => {
         AdminUser: req.user?.email || 'System',
         Action: 'Reset2FASecret'
       });
-      return res.json({ success: true, user: updated });
+      return res.json({ success: true, user: toPublicUser(updated) });
     }
 
     res.status(404).json({ success: false, error: 'User not found.' });
@@ -521,6 +578,9 @@ router.post('/reset-2fa', requireAuth, async (req: AuthRequest, res) => {
 // POST /api/auth/toggle-2fa
 router.post('/toggle-2fa', requireAuth, async (req: AuthRequest, res) => {
   try {
+    if (!(await canManageUser(req, req.body?.userId))) {
+      return res.status(403).json({ success: false, error: "Forbidden: requires 'users.update' permission.", code: 'FORBIDDEN' });
+    }
     const { userId, enabled } = req.body;
     if (!userId || enabled === undefined) {
       return res.status(400).json({ success: false, error: 'User identifier and enabled flag are required.' });
@@ -541,7 +601,7 @@ router.post('/toggle-2fa', requireAuth, async (req: AuthRequest, res) => {
         AdminUser: req.user?.email || 'System',
         Action: 'Toggle2FA'
       });
-      return res.json({ success: true, user: updated });
+      return res.json({ success: true, user: toPublicUser(updated) });
     }
 
     res.status(404).json({ success: false, error: 'User not found.' });
@@ -580,7 +640,7 @@ router.post('/sync', requireAuth, async (req: AuthRequest, res) => {
     res.json({ 
       success: true, 
       data: {
-        ...syncedUser,
+        ...toPublicUser(syncedUser),
         rolePermissions
       } 
     });
@@ -592,7 +652,7 @@ router.post('/sync', requireAuth, async (req: AuthRequest, res) => {
 
 
 // POST /api/auth/reset-password-admin
-router.post('/reset-password-admin', requireAuth, async (req: AuthRequest, res) => {
+router.post('/reset-password-admin', requireAuth, requirePermission('users.update'), async (req: AuthRequest, res) => {
   try {
     const { uid, newPassword } = req.body;
     if (!uid || !newPassword) {
@@ -746,10 +806,10 @@ router.post('/change-password', requireAuth, async (req: AuthRequest, res) => {
       return res.status(404).json({ success: false, error: 'User record not found.' });
     }
 
-    // Verify current password if provided
-    if (currentPassword && user.passwordHash) {
-      const match = await bcrypt.compare(currentPassword, user.passwordHash);
-      if (!match) {
+    // Require the current password, except for the forced first-login change where the
+    // user has just authenticated with it. A stolen session alone must not change the password.
+    if (!user.mustChangePassword) {
+      if (!currentPassword || !user.passwordHash || !(await bcrypt.compare(String(currentPassword), user.passwordHash))) {
         return res.status(400).json({ success: false, error: 'Current password does not match.' });
       }
     }
@@ -767,6 +827,7 @@ router.post('/change-password', requireAuth, async (req: AuthRequest, res) => {
     // Create a new session for this computer
     const sessionInfo = await SessionManager.createSession(
       {
+        id: updatedUser.id,
         uid: userUid,
         email: userEmail,
         fullName: updatedUser.fullName,

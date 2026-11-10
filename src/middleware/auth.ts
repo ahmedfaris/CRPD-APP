@@ -5,7 +5,10 @@ import jwt from 'jsonwebtoken';
 import { SessionManager, SESSION_COOKIE_NAME, clearSessionCookie } from '../server/services/sessionManager.ts';
 import { logger } from '../server/utils/logger.ts';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-fallback-key';
+import { JWT_SECRET } from '../server/utils/jwtSecret.ts';
+import { db } from '../db/index.ts';
+import { users, roles } from '../db/schema.ts';
+import { eq } from 'drizzle-orm';
 
 export interface AuthRequest extends Request {
   user?: DecodedIdToken | jwt.JwtPayload | any;
@@ -32,23 +35,9 @@ export const requireAuth = async (
     token = req.cookies[SESSION_COOKIE_NAME];
   }
 
+  // No token means no identity. Client-supplied headers such as x-user-email /
+  // x-user-role are never trusted as a substitute for a signed session token.
   if (!token) {
-    const userEmail = req.headers['x-user-email'] as string;
-    const userId = req.headers['x-user-id'] as string;
-    const userRole = req.headers['x-user-role'] as string;
-
-    if (userEmail || userId || process.env.NODE_ENV !== 'production') {
-      req.user = {
-        uid: userId || 'admin_uid_seed',
-        id: userId || '1',
-        email: userEmail || 'admin@system.local',
-        role: userRole || 'Admin',
-        userType: 'System Admin',
-        name: 'Administrator'
-      };
-      return next();
-    }
-
     logger.warning('Unauthorized request to {Path} from {ClientIp}: Missing session token or authentication credentials', {
       Path: req.path,
       ClientIp: clientIp,
@@ -90,7 +79,14 @@ export const requireAuth = async (
       return next();
     } else {
       // It's our custom enterprise JWT with session management
-      const decoded = jwt.verify(token, JWT_SECRET) as any;
+      const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as any;
+      // Short-lived 2FA challenge tokens only prove the password step; they are not sessions.
+      if (decoded?.purpose) {
+        return res.status(401).json({
+          error: 'Unauthorized: Invalid session token.',
+          code: 'INVALID_TOKEN'
+        });
+      }
       req.user = decoded;
 
       // If the token is bound to a server session ID, perform stateful session validation:
@@ -129,22 +125,6 @@ export const requireAuth = async (
   } catch (error: any) {
     clearSessionCookie(res, req);
 
-    const userEmail = req.headers['x-user-email'] as string;
-    const userId = req.headers['x-user-id'] as string;
-    const userRole = req.headers['x-user-role'] as string;
-
-    if (userEmail || userId || process.env.NODE_ENV !== 'production') {
-      req.user = {
-        uid: userId || 'admin_uid_seed',
-        id: userId || '1',
-        email: userEmail || 'admin@system.local',
-        role: userRole || 'Admin',
-        userType: 'System Admin',
-        name: 'Administrator'
-      };
-      return next();
-    }
-
     logger.warning('Unauthorized request to {Path} from {ClientIp}: Invalid or expired session token ({ErrorDetails})', {
       Path: req.path,
       ClientIp: clientIp,
@@ -155,8 +135,52 @@ export const requireAuth = async (
 
     return res.status(401).json({
       error: 'Unauthorized: Invalid or expired session token.',
-      code: 'TOKEN_EXPIRED',
-      details: error.message
+      code: 'TOKEN_EXPIRED'
     });
   }
 };
+
+/**
+ * Looks up the caller's current role and permissions from the database (not from
+ * the token, so role changes and removals take effect immediately).
+ */
+export async function getEffectivePermissions(uid: string | undefined): Promise<{ role: string; email: string; permissions: string[] } | null> {
+  if (!uid) return null;
+  const [row] = await db.select().from(users).where(eq(users.uid, String(uid)));
+  if (!row) return null;
+
+  const role = (row.role || '').trim();
+  const allRoles = await db.select().from(roles);
+  const roleRow = allRoles.find((r: any) => r.name?.trim().toLowerCase() === role.toLowerCase());
+  const permissions: string[] = roleRow && Array.isArray(roleRow.permissions) ? [...roleRow.permissions] : [];
+
+  const roleLower = role.toLowerCase();
+  if (roleLower === 'admin' || roleLower === 'administrator' || row.email?.toLowerCase() === 'admin@system.local') {
+    permissions.unshift('*');
+  }
+  return { role, email: row.email, permissions };
+}
+
+/**
+ * Route guard: must run after requireAuth. Allows the request only when the
+ * authenticated user's role grants the given permission (or '*').
+ */
+export const requirePermission = (permission: string) =>
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const effective = await getEffectivePermissions(req.user?.uid);
+      if (effective && (effective.permissions.includes('*') || effective.permissions.includes(permission))) {
+        return next();
+      }
+      logger.warning('Forbidden: {User} lacks permission {Permission} for {Path}', {
+        User: req.user?.email || 'unknown',
+        Permission: permission,
+        Path: req.originalUrl,
+        Action: 'PermissionDenied'
+      });
+      return res.status(403).json({ error: `Forbidden: requires '${permission}' permission.`, code: 'FORBIDDEN' });
+    } catch (error: any) {
+      logger.error('Permission check failed: {Error}', { Error: error.message });
+      return res.status(500).json({ error: 'Permission check failed.' });
+    }
+  };

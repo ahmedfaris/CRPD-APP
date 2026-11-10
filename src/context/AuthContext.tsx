@@ -351,6 +351,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const [pendingUser, setPendingUser] = useState<ApplicationUser | null>(null);
   const [pending2FASecret, setPending2FASecret] = useState<string | null>(null);
+  // Signed, short-lived proof that the password step succeeded; required by /verify-2fa.
+  const twoFactorChallengeRef = useRef<string | null>(null);
   const [isFirstTime2FA, setIsFirstTime2FA] = useState(false);
 
   const initiateLogin = async (email: string, pass: string) => {
@@ -386,7 +388,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (data.requires2FA || (data.user && data.user.twoFactorEnabled)) {
         setPendingUser(data.user);
         setIsFirstTime2FA(!!data.isFirstTime2FA);
-        setPending2FASecret(data.twoFactorSecret || data.user.twoFactorSecret || null);
+        setPending2FASecret(data.twoFactorSecret || null);
+        twoFactorChallengeRef.current = data.challengeToken || null;
         return { success: true };
       }
       
@@ -418,9 +421,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: pendingUser.email,
           code: cleanCode,
-          secret: pending2FASecret
+          challengeToken: twoFactorChallengeRef.current
         }),
         skipSessionInvalidationEvent: true
       });
@@ -439,6 +441,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem('auth_token', data.token);
       }
 
+      twoFactorChallengeRef.current = null;
       lastActivityRef.current = Date.now();
       setCurrentUser(data.user || pendingUser);
       setPendingUser(null);
@@ -482,6 +485,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const cancelPendingLogin = () => {
+    twoFactorChallengeRef.current = null;
     setPendingUser(null);
     setPending2FASecret(null);
     localStorage.removeItem('auth_token');
@@ -591,7 +595,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.warn("Backend reset 2FA call error:", e);
     }
     setUsers((prev) =>
-      prev.map((u) => (u.id === userId || u.uid === userId ? { ...u, twoFactorSecret: undefined } : u))
+      prev.map((u) => (u.id === userId || u.uid === userId ? { ...u, twoFactorSecret: undefined, hasTwoFactorSecret: false } : u))
     );
     if (currentUser?.id === userId || currentUser?.uid === userId) {
       setCurrentUser((prev) => (prev ? { ...prev, twoFactorSecret: undefined } : null));

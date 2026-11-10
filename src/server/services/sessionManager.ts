@@ -9,7 +9,7 @@ import { logger } from '../utils/logger.ts';
 export const IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes of inactivity
 export const ABSOLUTE_TIMEOUT_MS = 8 * 60 * 60 * 1000; // 8 hours absolute limit
 export const SESSION_COOKIE_NAME = 'session_token';
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-fallback-key';
+import { JWT_SECRET } from '../utils/jwtSecret.ts';
 
 export type InvalidationReason =
   | 'LOGOUT'
@@ -140,7 +140,7 @@ export class SessionManager {
    * Creates a new session for the user and enforces the Single Computer (Concurrent Login) policy
    */
   static async createSession(
-    user: { uid: string; email: string; fullName?: string; role?: string; userType?: string; department?: string },
+    user: { id?: string | number; uid: string; email: string; fullName?: string; role?: string; userType?: string; department?: string },
     req: Request
   ): Promise<{ sessionId: string; token: string; expiresAt: Date }> {
     const clientIp =
@@ -205,6 +205,7 @@ export class SessionManager {
     // 4. Generate JWT referencing the session ID
     const token = jwt.sign(
       {
+        ...(user.id !== undefined && user.id !== null ? { id: String(user.id) } : {}),
         uid: user.uid,
         email: user.email,
         name: user.fullName || user.email,
