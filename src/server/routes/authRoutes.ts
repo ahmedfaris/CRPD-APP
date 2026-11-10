@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { requireAuth, requirePermission, getEffectivePermissions, AuthRequest } from '../../middleware/auth.ts';
 import { toPublicUser } from '../utils/publicUser.ts';
-import { getOrCreateUser } from '../../db/users.ts';
 import { db } from '../../db/index.ts';
 import { users, roles } from '../../db/schema.ts';
 import { eq } from 'drizzle-orm';
@@ -617,11 +616,13 @@ router.post('/sync', requireAuth, async (req: AuthRequest, res) => {
       return res.status(401).json({ error: 'No user token found' });
     }
     
-    const syncedUser = await getOrCreateUser(
-      req.user.uid,
-      req.user.email || '',
-      req.user.name || 'Anonymous User'
-    );
+    // Look up the account the verified session belongs to. This endpoint never creates
+    // accounts or re-links an existing account to a new ID (that allowed account takeover
+    // via Firebase tokens).
+    const [syncedUser] = await db.select().from(users).where(eq(users.uid, String(req.user.uid)));
+    if (!syncedUser) {
+      return res.status(401).json({ error: 'User account not found.', code: 'USER_NOT_FOUND' });
+    }
 
     let rolePermissions: string[] = [];
     if (syncedUser?.role) {

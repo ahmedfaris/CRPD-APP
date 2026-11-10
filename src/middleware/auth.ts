@@ -1,6 +1,4 @@
 import { Request, Response, NextFunction } from 'express';
-import { adminAuth } from '../lib/firebase-admin.ts';
-import { DecodedIdToken } from 'firebase-admin/auth';
 import jwt from 'jsonwebtoken';
 import { SessionManager, SESSION_COOKIE_NAME, clearSessionCookie } from '../server/services/sessionManager.ts';
 import { logger } from '../server/utils/logger.ts';
@@ -11,7 +9,7 @@ import { users, roles } from '../db/schema.ts';
 import { eq } from 'drizzle-orm';
 
 export interface AuthRequest extends Request {
-  user?: DecodedIdToken | jwt.JwtPayload | any;
+  user?: jwt.JwtPayload | any;
   sessionId?: string;
 }
 
@@ -70,58 +68,57 @@ export const requireAuth = async (
       });
     }
 
-    const header = decodedTokenHeader.header;
+    // Only this server's own HS256 session tokens are accepted. Firebase ID tokens
+    // (RS256) are no longer a way to sign in.
+    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as any;
+    // Short-lived 2FA challenge tokens only prove the password step; they are not sessions.
+    if (decoded?.purpose) {
+      return res.status(401).json({
+        error: 'Unauthorized: Invalid session token.',
+        code: 'INVALID_TOKEN'
+      });
+    }
+    // Every session token issued by /login or /verify-2fa is bound to a server-side session.
+    if (!decoded?.sessionId) {
+      return res.status(401).json({
+        error: 'Unauthorized: Invalid session token.',
+        code: 'INVALID_TOKEN'
+      });
+    }
+    req.user = decoded;
 
-    if (header.alg === 'RS256' || header.kid) {
-      // It's a Firebase ID token (legacy/external fallback)
-      const decodedToken = await adminAuth.verifyIdToken(token);
-      req.user = decodedToken;
-      return next();
-    } else {
-      // It's our custom enterprise JWT with session management
-      const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as any;
-      // Short-lived 2FA challenge tokens only prove the password step; they are not sessions.
-      if (decoded?.purpose) {
+    // If the token is bound to a server session ID, perform stateful session validation:
+    // - Checks Idle Timeout (15 minutes inactivity)
+    // - Checks Absolute Timeout (8 hours maximum lifetime)
+    // - Checks Session Invalidation (Logout, Password change, Privilege change)
+    // - Checks Concurrent Login (Single active computer enforcement)
+    if (decoded.sessionId) {
+      req.sessionId = decoded.sessionId;
+      const sessionValidation = await SessionManager.validateAndTouchSession(decoded.sessionId);
+
+      if (!sessionValidation.valid) {
+        clearSessionCookie(res, req);
+
+        logger.warning('Unauthorized request to {Path} from {ClientIp}: Session {SessionId} rejected ({Code}). Reason: {Reason}', {
+          Path: req.path,
+          ClientIp: clientIp,
+          SessionId: decoded.sessionId,
+          Code: sessionValidation.code,
+          Reason: sessionValidation.error,
+          Action: 'SessionAccessRejected',
+          Subsystem: 'SessionManagement'
+        });
+
         return res.status(401).json({
-          error: 'Unauthorized: Invalid session token.',
-          code: 'INVALID_TOKEN'
+          error: sessionValidation.error,
+          errorAr: sessionValidation.errorAr,
+          code: sessionValidation.code,
+          requiresRelogin: true
         });
       }
-      req.user = decoded;
-
-      // If the token is bound to a server session ID, perform stateful session validation:
-      // - Checks Idle Timeout (15 minutes inactivity)
-      // - Checks Absolute Timeout (8 hours maximum lifetime)
-      // - Checks Session Invalidation (Logout, Password change, Privilege change)
-      // - Checks Concurrent Login (Single active computer enforcement)
-      if (decoded.sessionId) {
-        req.sessionId = decoded.sessionId;
-        const sessionValidation = await SessionManager.validateAndTouchSession(decoded.sessionId);
-
-        if (!sessionValidation.valid) {
-          clearSessionCookie(res, req);
-
-          logger.warning('Unauthorized request to {Path} from {ClientIp}: Session {SessionId} rejected ({Code}). Reason: {Reason}', {
-            Path: req.path,
-            ClientIp: clientIp,
-            SessionId: decoded.sessionId,
-            Code: sessionValidation.code,
-            Reason: sessionValidation.error,
-            Action: 'SessionAccessRejected',
-            Subsystem: 'SessionManagement'
-          });
-
-          return res.status(401).json({
-            error: sessionValidation.error,
-            errorAr: sessionValidation.errorAr,
-            code: sessionValidation.code,
-            requiresRelogin: true
-          });
-        }
-      }
-
-      return next();
     }
+
+    return next();
   } catch (error: any) {
     clearSessionCookie(res, req);
 

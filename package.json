@@ -30,7 +30,6 @@
     "drizzle-orm": "^0.45.2",
     "express": "^5.2.1",
     "firebase": "^12.19.0",
-    "firebase-admin": "^14.4.0",
     "html5-qrcode": "^2.3.8",
     "jsonwebtoken": "^9.0.3",
     "jszip": "^3.10.2",

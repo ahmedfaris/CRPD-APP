@@ -1,6 +1,4 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
-import { auth } from '../lib/firebase';
-import { signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { ApplicationUser, isUserTechnical } from '../types';
 import { INITIAL_USERS } from '../data/mockData';
 import { logger } from '../utils/logger';
@@ -67,7 +65,6 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<ApplicationUser | null>(null);
   const [users, setUsers] = useState<ApplicationUser[]>(INITIAL_USERS);
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
 
   // Security Alert Modal State
   const [securityModal, setSecurityModal] = useState<{
@@ -163,40 +160,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           localStorage.removeItem('auth_token');
         }
       }
-      
-      const unsubscribe = onAuthStateChanged(auth, async (user) => {
-        setFirebaseUser(user);
-        if (user) {
-          try {
-            const token = await user.getIdToken();
-            const res = await apiFetch('/api/auth/sync', {
-              method: 'POST',
-              headers: { 'Authorization': `Bearer ${token}` },
-              skipSessionInvalidationEvent: true
-            } as any);
-            
-            if (res.ok) {
-              const data = await res.json();
-              if (data.data) {
-                setCurrentUser(data.data as ApplicationUser);
-                lastActivityRef.current = Date.now();
-              }
-            }
-          } catch (err) {
-            console.error('Firebase token resolution error:', err);
-          }
-        } else {
-          if (!localStorage.getItem('auth_token')) {
-            setCurrentUser(null);
-          }
-        }
-      });
-      return unsubscribe;
     };
     
-    let unsub = () => {};
-    checkLocalSession().then((ret) => { if (ret) unsub = ret; });
-    return () => unsub();
+    checkLocalSession();
   }, []);
 
   // 2. Activity Tracking for Idle Timeout
@@ -490,9 +456,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPending2FASecret(null);
     localStorage.removeItem('auth_token');
     localStorage.removeItem('auth_user_cache');
-    try {
-      signOut(auth);
-    } catch (_) {}
   };
 
   /**
@@ -511,16 +474,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem('auth_user_cache');
       sessionStorage.removeItem('auth_token');
 
-      // 3. Sign out from Firebase if present
-      try {
-        await signOut(auth);
-      } catch (err) {
-        console.warn("Firebase signOut error:", err);
-      }
-
-      // 4. Clear all React state
+      // 3. Clear all React state
       setCurrentUser(null);
-      setFirebaseUser(null);
       setPendingUser(null);
       setPending2FASecret(null);
       setIsFirstTime2FA(false);

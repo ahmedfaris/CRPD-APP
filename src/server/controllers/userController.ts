@@ -1,6 +1,5 @@
 // src/server/controllers/userController.ts
 import { Request, Response } from 'express';
-import { adminAuth } from '../../lib/firebase-admin.ts';
 import { AuthRequest } from '../../middleware/auth.ts';
 import { logger } from '../utils/logger.ts';
 import { SessionManager } from '../services/sessionManager.ts';
@@ -71,18 +70,9 @@ export class UserController {
         }
       }
 
-      // 1. Create user in Firebase Auth
-      let uid = 'usr_' + Date.now().toString() + '_' + Math.random().toString(36).substring(2, 6);
-      try {
-        const firebaseUser = await adminAuth.createUser({
-          email: userData.email,
-          password: userData.initialPassword,
-          displayName: userData.fullName,
-        });
-        uid = firebaseUser.uid;
-      } catch (err: any) {
-        console.warn("Firebase Auth admin API skipped due to missing service account ADC credentials, mocking UID:", err.message);
-      }
+      // 1. Generate an unguessable user ID (accounts live only in this app's database)
+      const crypto = await import('crypto');
+      const uid = 'usr_' + Date.now().toString() + '_' + crypto.randomBytes(6).toString('hex');
 
       const randomColor = colors[Math.floor(Math.random() * colors.length)];
       
@@ -132,12 +122,6 @@ export class UserController {
     try {
       const uid = req.params.id as string;
       
-      // Delete from Firebase
-      try {
-        await adminAuth.deleteUser(uid);
-      } catch (err: any) {
-        console.warn("Firebase Auth admin API skipped due to missing service account ADC credentials, deleting from PG only:", err.message);
-      }
 
       // Delete from database via UserModel
       await UserModel.deleteUser(uid);
