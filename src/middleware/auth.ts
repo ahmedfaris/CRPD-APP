@@ -68,8 +68,7 @@ export const requireAuth = async (
       });
     }
 
-    // Only this server's own HS256 session tokens are accepted. Firebase ID tokens
-    // (RS256) are no longer a way to sign in.
+    // Only this server's own HS256 session tokens are accepted.
     const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as any;
     // Short-lived 2FA challenge tokens only prove the password step; they are not sessions.
     if (decoded?.purpose) {

@@ -23,7 +23,6 @@ import {
 interface MetroNavbarProps {
   currentApp: 'metro' | 'tickets' | 'archiving' | 'employees' | 'policy' | 'org-structure' | 'devices';
   onSelectApp: (app: 'metro' | 'tickets' | 'archiving' | 'employees' | 'policy' | 'org-structure' | 'devices') => void;
-  onOpenDocsExport?: () => void;
   onSelectTicket?: (ticketId: string) => void;
 }
 

@@ -44,7 +44,6 @@ import {
 
 interface SystemSettingsModalProps {
   onClose: () => void;
-  onOpenDocsExport?: () => void;
 }
 
 interface DbStats {
@@ -67,7 +66,7 @@ interface DbStats {
   timestamp: string;
 }
 
-export function SystemSettingsModal({ onClose, onOpenDocsExport }: SystemSettingsModalProps) {
+export function SystemSettingsModal({ onClose }: SystemSettingsModalProps) {
   const { systemSettings, updateSystemSettings, teams, assignUserToTeam, removeUserFromTeam, tickets } = useTickets();
   const { currentUser, users } = useAuth();
   const { language, dir } = useLanguage();
@@ -855,53 +854,6 @@ export function SystemSettingsModal({ onClose, onOpenDocsExport }: SystemSetting
                     </div>
                   </div>
 
-                  {/* Format 3: Google Docs Integration Export */}
-                  {onOpenDocsExport && (
-                    <div className="p-4 bg-gradient-to-br from-indigo-50/50 to-blue-50/50 rounded-xl border border-indigo-200 shadow-xs flex flex-col justify-between hover:border-indigo-400 transition md:col-span-2">
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-2">
-                            <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-mono font-bold text-xs mx-1">
-                              Doc
-                            </div>
-                            <div>
-                              <h5 className="font-bold text-slate-900 text-xs flex items-center space-x-1.5">
-                                <span>{language === 'ar' ? 'تصدير توثيق معمارية الدخول إلى Google Docs' : 'Export Authentication Docs to Google Docs'}</span>
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-700">Google Drive API</span>
-                              </h5>
-                              <span className="text-[10px] text-indigo-700 font-semibold">
-                                {language === 'ar' ? 'إنشاء مستند سحابي حي في Google Drive' : 'Live Google Drive Document Creation'}
-                              </span>
-                            </div>
-                          </div>
-                          <CloudCheck className="w-5 h-5 text-indigo-600" />
-                        </div>
-
-                        <p className="text-[11px] text-slate-600 leading-relaxed">
-                          {language === 'ar'
-                            ? 'يقوم هذا الخيار بإنشاء مستند جديد في حساب Google Drive الخاص بك وكتابة كامل تفاصيل توثيق معمارية التحقق (Bcrypt, JWT, 2FA/TOTP)، الحسابات الافتراضية، وسياسات الحظر التصاعدي مباشرة.'
-                            : 'Generates a brand new document in your Google Drive and inserts the complete authentication and login architecture documentation, seeded credentials, TOTP tolerance rules, and lockout workflows.'}
-                        </p>
-                      </div>
-
-                      <div className="mt-4 pt-3 border-t border-indigo-100 flex items-center justify-between">
-                        <span className="text-[10px] text-slate-500 font-mono">
-                          OAuth: documents + drive.file
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onClose();
-                            onOpenDocsExport();
-                          }}
-                          className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-xs transition flex items-center space-x-1.5 cursor-pointer"
-                        >
-                          <FileText className="w-3.5 h-3.5 mx-1" />
-                          <span>{language === 'ar' ? 'فتح شاشة تصدير Google Docs' : 'Export to Google Docs'}</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
 
                 </div>
 

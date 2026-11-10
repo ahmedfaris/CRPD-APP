@@ -617,8 +617,7 @@ router.post('/sync', requireAuth, async (req: AuthRequest, res) => {
     }
     
     // Look up the account the verified session belongs to. This endpoint never creates
-    // accounts or re-links an existing account to a new ID (that allowed account takeover
-    // via Firebase tokens).
+    // accounts or re-links an existing account to a new ID.
     const [syncedUser] = await db.select().from(users).where(eq(users.uid, String(req.user.uid)));
     if (!syncedUser) {
       return res.status(401).json({ error: 'User account not found.', code: 'USER_NOT_FOUND' });

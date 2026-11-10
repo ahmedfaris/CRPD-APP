@@ -26,7 +26,6 @@ interface NavbarProps {
   onSelectTab: (tab: 'tickets' | 'dashboard' | 'users') => void;
   onOpenCreateTicket?: () => void;
   onBackToMetro?: () => void;
-  onOpenDocsExport?: () => void;
   onSelectTicket?: (ticketId: string) => void;
 }
 
@@ -34,7 +33,6 @@ export function Navbar({
   currentTab, 
   onSelectTab, 
   onBackToMetro,
-  onOpenDocsExport,
   onSelectTicket
 }: NavbarProps) {
   const { currentUser, logout, isAdmin, canAccessTeamManagement } = useAuth();

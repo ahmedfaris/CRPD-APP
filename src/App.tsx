@@ -20,7 +20,6 @@ import { UserManagementAppView } from './components/UserManagementAppView';
 import { UserPolicyControlView } from './components/UserPolicyControlView';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { SystemSettingsModal } from './components/SystemSettingsModal';
-import { ExportDocsModal } from './components/ExportDocsModal';
 import { OrgStructureApp } from './components/OrgStructureApp';
 import { DeviceManagementApp } from './components/DeviceManagementApp';
 import { Ticket } from './types';
@@ -83,7 +82,6 @@ function AppContent() {
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [showDocsExportModal, setShowDocsExportModal] = useState(false);
 
   const { activeTicketModalId, setActiveTicketModalId } = useNotifications();
 
@@ -112,7 +110,6 @@ function AppContent() {
         <MetroNavbar 
           currentApp="metro" 
           onSelectApp={setCurrentApp} 
-          onOpenDocsExport={() => setShowDocsExportModal(true)}
           onSelectTicket={handleSelectTicketFromNav}
         />
         <main className="flex-1">
@@ -122,18 +119,13 @@ function AppContent() {
             documentCount={5}
             employeeCount={6}
             onOpenSettings={() => setShowSettingsModal(true)}
-            onOpenDocsExport={() => setShowDocsExportModal(true)}
           />
         </main>
       {/* Main Container Modals */}
         {showSettingsModal && (
           <SystemSettingsModal 
             onClose={() => setShowSettingsModal(false)} 
-            onOpenDocsExport={() => setShowDocsExportModal(true)}
           />
-        )}
-        {showDocsExportModal && (
-          <ExportDocsModal onClose={() => setShowDocsExportModal(false)} />
         )}
       </div>
     );
@@ -155,15 +147,11 @@ function AppContent() {
         <MetroNavbar 
           currentApp="archiving" 
           onSelectApp={setCurrentApp} 
-          onOpenDocsExport={() => setShowDocsExportModal(true)}
           onSelectTicket={handleSelectTicketFromNav}
         />
         <main className="flex-1">
           <ArchivingApp onBackToMetro={() => setCurrentApp('metro')} />
         </main>
-        {showDocsExportModal && (
-          <ExportDocsModal onClose={() => setShowDocsExportModal(false)} />
-        )}
       </div>
     );
   }
@@ -184,15 +172,11 @@ function AppContent() {
         <MetroNavbar 
           currentApp="employees" 
           onSelectApp={setCurrentApp} 
-          onOpenDocsExport={() => setShowDocsExportModal(true)}
           onSelectTicket={handleSelectTicketFromNav}
         />
         <main className="flex-1">
           <EmployeeManagementApp onBackToMetro={() => setCurrentApp('metro')} />
         </main>
-        {showDocsExportModal && (
-          <ExportDocsModal onClose={() => setShowDocsExportModal(false)} />
-        )}
       </div>
     );
   }
@@ -213,9 +197,6 @@ function AppContent() {
         <UserManagementAppView 
           onBackToHub={() => setCurrentApp('metro')} 
         />
-        {showDocsExportModal && (
-          <ExportDocsModal onClose={() => setShowDocsExportModal(false)} />
-        )}
       </>
     );
   }
@@ -236,15 +217,11 @@ function AppContent() {
         <MetroNavbar 
           currentApp="org-structure" 
           onSelectApp={setCurrentApp} 
-          onOpenDocsExport={() => setShowDocsExportModal(true)}
           onSelectTicket={handleSelectTicketFromNav}
         />
         <main className="flex-1">
           <OrgStructureApp onBackToMetro={() => setCurrentApp('metro')} />
         </main>
-        {showDocsExportModal && (
-          <ExportDocsModal onClose={() => setShowDocsExportModal(false)} />
-        )}
       </div>
     );
   }
@@ -265,15 +242,11 @@ function AppContent() {
         <MetroNavbar 
           currentApp="devices" 
           onSelectApp={setCurrentApp} 
-          onOpenDocsExport={() => setShowDocsExportModal(true)}
           onSelectTicket={handleSelectTicketFromNav}
         />
         <main className="flex-1">
           <DeviceManagementApp onBackToMetro={() => setCurrentApp('metro')} />
         </main>
-        {showDocsExportModal && (
-          <ExportDocsModal onClose={() => setShowDocsExportModal(false)} />
-        )}
       </div>
     );
   }
@@ -297,7 +270,6 @@ function AppContent() {
         currentTab={currentTab}
         onSelectTab={setCurrentTab}
         onBackToMetro={() => setCurrentApp('metro')}
-        onOpenDocsExport={() => setShowDocsExportModal(true)}
         onSelectTicket={handleSelectTicketFromNav}
       />
 
@@ -365,13 +337,9 @@ function AppContent() {
       {showSettingsModal && (
         <SystemSettingsModal 
           onClose={() => setShowSettingsModal(false)} 
-          onOpenDocsExport={() => setShowDocsExportModal(true)}
         />
       )}
 
-      {showDocsExportModal && (
-        <ExportDocsModal onClose={() => setShowDocsExportModal(false)} />
-      )}
 
       {/* Mandatory Password Change Filter Interceptor */}
       <ChangePasswordModal />

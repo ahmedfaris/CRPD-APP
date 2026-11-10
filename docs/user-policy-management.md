@@ -65,6 +65,6 @@ twoFactorSecret: text('two_factor_secret'),
 
 ## Security Considerations
 
-1. **Authentication Routing:** The `src/middleware/auth.ts` intelligently distinguishes between custom system JWTs (`HS256`) and Firebase Auth tokens (`RS256`), ensuring that expired sessions correctly return a `401 Unauthorized` rather than triggering upstream SDK errors.
+1. **Authentication Routing:** `src/middleware/auth.ts` accepts only the system's own session JWTs (`HS256`, bound to a server-side session); invalid or expired sessions return `401 Unauthorized`.
 2. **CSRF Protection:** Administrative actions in the dashboard require a strict `x-app-action` header.
 3. **Role Validation:** All backend routes processing policy updates strictly require the authenticated user to possess the `Admin` role.

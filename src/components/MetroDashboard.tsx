@@ -34,7 +34,6 @@ interface MetroDashboardProps {
   documentCount: number;
   employeeCount: number;
   onOpenSettings?: () => void;
-  onOpenDocsExport?: () => void;
 }
 
 export function MetroDashboard({ 

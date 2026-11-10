@@ -2,7 +2,7 @@ import { pgTable, serial, text, timestamp, boolean, integer, jsonb, numeric, typ
 
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
-  uid: text('uid').notNull().unique(), // Firebase Auth UID
+  uid: text('uid').notNull().unique(), // Stable application user ID
   userName: text('user_name'),
   email: text('email').notNull(),
   emailConfirmed: boolean('email_confirmed').default(false),
