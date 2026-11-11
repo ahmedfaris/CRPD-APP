@@ -2,16 +2,23 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { TICKETS_ARCHIVE_DIR } from '../services/ticketArchiveService.ts';
+import { requireAuth } from '../../middleware/auth.ts';
+import { requireTicketFolderAccess } from '../utils/ticketAccess.ts';
+import { TicketModel } from '../models/ticketModel.ts';
 
 const router = express.Router();
+
+// Ticket attachments are private: the user must be signed in and allowed to see the ticket.
+router.use(requireAuth);
+const canAccessTicketFolder = requireTicketFolderAccess((ticketNo) => TicketModel.getTicketDbRow(ticketNo));
 
 /**
  * GET /api/tickets-archive/:ticketNo/:fileName
  * Serves an archived file for a ticket
  */
-router.get('/:ticketNo/:fileName', (req, res) => {
+router.get('/:ticketNo/:fileName', canAccessTicketFolder, (req, res) => {
   try {
-    const { ticketNo, fileName } = req.params;
+    const { ticketNo, fileName } = req.params as { ticketNo: string; fileName: string };
     if (!ticketNo || !fileName) {
       return res.status(400).json({ error: 'Ticket number and file name are required' });
     }
@@ -40,7 +47,7 @@ router.get('/:ticketNo/:fileName', (req, res) => {
     const contentType = mimeTypes[ext] || 'application/octet-stream';
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(safeFileName)}`);
-    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
 
     const stream = fs.createReadStream(filePath);
     stream.pipe(res);
@@ -53,9 +60,9 @@ router.get('/:ticketNo/:fileName', (req, res) => {
  * GET /api/tickets-archive/:ticketNo
  * Lists all archived files for a ticket
  */
-router.get('/:ticketNo', (req, res) => {
+router.get('/:ticketNo', canAccessTicketFolder, (req, res) => {
   try {
-    const { ticketNo } = req.params;
+    const { ticketNo } = req.params as { ticketNo: string };
     const safeTicketNo = ticketNo.replace(/[\\/:*?"<>|\r\n\t]/g, '_');
     const ticketFolder = path.join(TICKETS_ARCHIVE_DIR, safeTicketNo);
 

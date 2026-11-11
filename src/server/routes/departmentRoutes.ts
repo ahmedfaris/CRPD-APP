@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth, AuthRequest } from '../../middleware/auth.ts';
+import { requireAuth, AuthRequest, getEffectivePermissions } from '../../middleware/auth.ts';
 import { db } from '../../db/index.ts';
 import { departments, users } from '../../db/schema.ts';
 import { eq } from 'drizzle-orm';
@@ -7,13 +7,91 @@ import { logger } from '../utils/logger.ts';
 
 const router = Router();
 
-// Middleware to check if user is admin
+// Who may change the structure (mirrors the UI's canManageOrg): admins (Admin / Administrator /
+// System Admin roles or '*') and roles with an Organization Structure or org.manage permission.
+// Roles are read from the database, not the login token, so changes apply immediately.
 const requireAdmin = async (req: AuthRequest, res: any, next: any) => {
-  if (req.user?.role !== 'Admin' && req.user?.email !== 'admin@system.local') {
-    return res.status(403).json({ error: 'Requires Admin role' });
+  try {
+    const eff = await getEffectivePermissions(req.user?.uid);
+    const role = (eff?.role || '').toLowerCase();
+    const allowed = !!eff && (
+      eff.permissions.includes('*') ||
+      ['admin', 'administrator', 'system admin'].includes(role) ||
+      eff.permissions.some(p => p.startsWith('Organization Structure.') || p === 'org.manage')
+    );
+    if (!allowed) {
+      return res.status(403).json({ error: 'Requires permission to manage the organizational structure' });
+    }
+    next();
+  } catch (e: any) {
+    res.status(500).json({ error: 'Permission check failed' });
   }
-  next();
 };
+
+/** Parse a numeric :id; responds 400 and returns null when invalid. */
+function parseUnitId(req: AuthRequest, res: any): number | null {
+  const raw = String(req.params.id ?? '');
+  if (!/^\d+$/.test(raw)) {
+    res.status(400).json({ error: 'Invalid organizational unit ID' });
+    return null;
+  }
+  return parseInt(raw, 10);
+}
+
+/** Normalize a parentId from the request: undefined = not provided, null = top level. */
+function normalizeParentId(parentId: any): number | null | undefined | 'invalid' {
+  if (parentId === undefined) return undefined;
+  if (parentId === null || parentId === '' || parentId === 0 || parentId === '0') return null;
+  const n = Number(parentId);
+  return Number.isInteger(n) && n > 0 ? n : 'invalid';
+}
+
+/**
+ * Validates parent, manager and sibling-name rules. Returns an error message or null.
+ * - the parent must exist, must not be the unit itself, and must not be one of its descendants
+ *   (that would create a loop and the unit would vanish from the tree);
+ * - the manager must be an existing user;
+ * - two units under the same parent may not share an English name.
+ */
+async function validateUnit(opts: { id?: number; name: string; parentId: number | null; managerId?: string | null }): Promise<{ status: number; error: string } | null> {
+  const all = await db.select().from(departments);
+  if (opts.parentId !== null) {
+    if (opts.id !== undefined && opts.parentId === opts.id) {
+      return { status: 400, error: 'An organizational unit cannot be its own parent.' };
+    }
+    if (!all.some(d => d.id === opts.parentId)) {
+      return { status: 400, error: 'The selected parent unit does not exist.' };
+    }
+    if (opts.id !== undefined) {
+      // Walk up from the new parent; reaching this unit means the parent is its descendant.
+      const parentOf = new Map<number, number | null>(all.map((d: any) => [d.id as number, (d.parentId ?? null) as number | null]));
+      let cursor: number | null | undefined = opts.parentId;
+      const seen = new Set<number>();
+      while (cursor !== null && cursor !== undefined && !seen.has(cursor)) {
+        if (cursor === opts.id) {
+          return { status: 400, error: 'A unit cannot be moved under one of its own sub-units.' };
+        }
+        seen.add(cursor);
+        cursor = parentOf.get(cursor) ?? null;
+      }
+    }
+  }
+  if (opts.managerId) {
+    const [manager] = await db.select({ uid: users.uid }).from(users).where(eq(users.uid, String(opts.managerId)));
+    if (!manager) {
+      return { status: 400, error: 'The selected manager does not exist.' };
+    }
+  }
+  const nameNorm = opts.name.trim().toLowerCase();
+  const clash = all.find(d =>
+    d.id !== opts.id &&
+    (d.parentId ?? null) === opts.parentId &&
+    (d.name || '').trim().toLowerCase() === nameNorm);
+  if (clash) {
+    return { status: 409, error: 'A unit with this name already exists at this level.' };
+  }
+  return null;
+}
 
 // GET /api/departments - Get all organizational units
 router.get('/', requireAuth, async (req: AuthRequest, res) => {
@@ -85,7 +163,15 @@ router.post('/', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
       description: description || ''
     });
 
-    const parsedParentId = (parentId === null || parentId === '' || parentId === undefined) ? null : Number(parentId);
+    const normalizedParent = normalizeParentId(parentId);
+    if (normalizedParent === 'invalid') {
+      return res.status(400).json({ error: 'Invalid parent unit ID' });
+    }
+    const parsedParentId = normalizedParent ?? null;
+    const problem = await validateUnit({ name: nameEn, parentId: parsedParentId, managerId: managerId || null });
+    if (problem) {
+      return res.status(problem.status).json({ error: problem.error });
+    }
 
     const [newOrg] = await db.insert(departments).values({
       name: nameEn.trim(),
@@ -118,7 +204,8 @@ router.post('/', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
 // PUT /api/departments/:id - Update an organizational unit
 router.put('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = parseUnitId(req, res);
+    if (id === null) return;
     const { nameEn, nameAr, orgType, description, parentId, managerId } = req.body;
 
     if (!nameEn || !nameEn.trim()) {
@@ -128,8 +215,23 @@ router.put('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Arabic Name is required' });
     }
     
-    if (parentId === id) {
-      return res.status(400).json({ error: 'An organizational unit cannot be its own parent.' });
+    const normalizedParent = normalizeParentId(parentId);
+    if (normalizedParent === 'invalid') {
+      return res.status(400).json({ error: 'Invalid parent unit ID' });
+    }
+    const [current] = await db.select().from(departments).where(eq(departments.id, id));
+    if (!current) {
+      return res.status(404).json({ error: 'Organizational unit not found' });
+    }
+    const effectiveParent = normalizedParent === undefined ? (current.parentId ?? null) : normalizedParent;
+    const problem = await validateUnit({
+      id,
+      name: nameEn,
+      parentId: effectiveParent,
+      managerId: managerId === undefined ? null : (managerId || null),
+    });
+    if (problem) {
+      return res.status(problem.status).json({ error: problem.error });
     }
 
     const payloadDesc = JSON.stringify({
@@ -148,8 +250,8 @@ router.put('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
       updateValues.managerId = managerId || null;
     }
 
-    if (parentId !== undefined) {
-      updateValues.parentId = (parentId === null || parentId === '' || parentId === 0) ? null : Number(parentId);
+    if (normalizedParent !== undefined) {
+      updateValues.parentId = normalizedParent;
     }
 
     const [updatedOrg] = await db.update(departments).set(updateValues).where(eq(departments.id, id)).returning();
@@ -182,8 +284,9 @@ router.put('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
 // DELETE /api/departments/:id - Delete an organizational unit
 router.delete('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
-    const id = parseInt(req.params.id as string);
-    
+    const id = parseUnitId(req, res);
+    if (id === null) return;
+
     // Check if it has children
     const children = await db.select().from(departments).where(eq(departments.parentId, id));
     if (children.length > 0) {

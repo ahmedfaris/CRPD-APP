@@ -21,6 +21,8 @@ import ticketRequestRoutes from './src/server/routes/ticketRequestRoutes.ts';
 import ticketArchiveRoutes from './src/server/routes/ticketArchiveRoutes.ts';
 import notificationRoutes from './src/server/routes/notificationRoutes.ts';
 import { requireAuth } from './src/middleware/auth.ts';
+import { requireTicketFolderAccess } from './src/server/utils/ticketAccess.ts';
+import { TicketModel } from './src/server/models/ticketModel.ts';
 import { TicketRequestFileService, TICKET_REQUESTS_DIR } from './src/server/services/ticketRequestFileService.ts';
 import { TicketArchiveService, TICKETS_ARCHIVE_DIR } from './src/server/services/ticketArchiveService.ts';
 import { NotificationService } from './src/server/services/notificationService.ts';
@@ -52,10 +54,12 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
   // Static disk folder serving for ticket requests and tickets archive
+  // Archived ticket files live in a folder per ticket number; only users who may see that ticket get them.
+  const ticketFolderGuard = requireTicketFolderAccess((ticketNo) => TicketModel.getTicketDbRow(ticketNo));
   app.use('/ticket requests', requireAuth, express.static(TICKET_REQUESTS_DIR));
   app.use('/ticket-requests', requireAuth, express.static(TICKET_REQUESTS_DIR));
-  app.use('/tickets archive', requireAuth, express.static(TICKETS_ARCHIVE_DIR));
-  app.use('/tickets-archive', requireAuth, express.static(TICKETS_ARCHIVE_DIR));
+  app.use('/tickets archive', requireAuth, ticketFolderGuard, express.static(TICKETS_ARCHIVE_DIR));
+  app.use('/tickets-archive', requireAuth, ticketFolderGuard, express.static(TICKETS_ARCHIVE_DIR));
 
   // ==========================================
   // API Routes (Backend MVC)

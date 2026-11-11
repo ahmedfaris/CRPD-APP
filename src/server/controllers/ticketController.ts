@@ -3,7 +3,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../../middleware/auth.ts';
 import { TicketModel } from '../models/ticketModel.ts';
 import { logger } from '../utils/logger.ts';
-import { isUserTechnical } from '../../types.ts';
+import { getTicketAccess, canViewTicket, sanitizeTicketFor, forbidTicket } from '../utils/ticketAccess.ts';
 
 function getParam(val: string | string[] | undefined): string {
   if (!val) return '';
@@ -49,55 +49,10 @@ export class TicketController {
         assigneeId: assigneeId as string | undefined,
       };
 
-      let ticketsList = await TicketModel.getAllTickets(filters);
-
-      // Technical users, agents, and admins have full visibility across all tickets sent to technical teams
-      const isTechnical = isUserTechnical(actor);
-
-      // Only non-technical operator users are restricted to tickets belonging to their departments
-      const isOpUser = !isTechnical;
-
-      if (isOpUser && actor.department && actor.department !== 'Unassigned') {
-        const uDept = actor.department.toLowerCase().trim();
-        const synonymGroups = [
-          ['operations', 'operations & logistics', 'العمليات', 'العمليات والتنفيذ'],
-          ['information technology', 'it', 'it operations', 'it service desk', 'تكنولوجيا المعلومات', 'تقنية المعلومات'],
-          ['customer support & helpdesk', 'customer support', 'helpdesk', 'دعم العملاء ومكتب المساعدة', 'الدعم الفني'],
-          ['electronic archiving & records', 'archiving', 'الأرشيف الإلكتروني', 'الأرشفة الإلكترونية والسجلات', 'الأرشفة'],
-          ['human resources', 'hr', 'الموارد البشرية']
-        ];
-
-        ticketsList = ticketsList.filter((t: any) => {
-          // If created by or requested by this user, it's their department ticket
-          if (
-            (t.requesterId && (t.requesterId === actor.id || t.requesterId === actor.uid)) ||
-            (t.requesterEmail && actor.email && t.requesterEmail.toLowerCase() === actor.email.toLowerCase()) ||
-            (t.requesterName && actor.fullName && t.requesterName.toLowerCase() === actor.fullName.toLowerCase())
-          ) {
-            return true;
-          }
-
-          const tDepts: string[] = [t.department, t.requesterDept, t.hardwareDetails?.department]
-            .filter(Boolean)
-            .map((d: any) => String(d).toLowerCase().trim());
-
-          // Direct match or substring
-          if (tDepts.some(d => d === uDept || d.includes(uDept) || uDept.includes(d))) {
-            return true;
-          }
-
-          // Synonym group matching
-          for (const group of synonymGroups) {
-            const userInGroup = group.some(term => uDept.includes(term) || term.includes(uDept));
-            if (userInGroup) {
-              const ticketInGroup = tDepts.some(td => group.some(term => td.includes(term) || term.includes(td)));
-              if (ticketInGroup) return true;
-            }
-          }
-
-          return false;
-        });
-      }
+      const access = await getTicketAccess(req);
+      const ticketsList = (await TicketModel.getAllTickets(filters))
+        .filter((t: any) => canViewTicket(t, access))
+        .map((t: any) => sanitizeTicketFor(t, access));
 
       res.status(200).json({
         success: true,
@@ -141,8 +96,10 @@ export class TicketController {
     try {
       const id = getParam(req.params.id);
       const ticket = await TicketModel.getTicketById(id);
+      const access = await getTicketAccess(req);
 
-      if (!ticket) {
+      // Tickets the user may not see are reported as not found (no existence leak).
+      if (!ticket || !canViewTicket(ticket, access)) {
         return res.status(404).json({
           success: false,
           error: `Ticket '${id}' not found`,
@@ -151,7 +108,7 @@ export class TicketController {
 
       res.status(200).json({
         success: true,
-        data: ticket,
+        data: sanitizeTicketFor(ticket, access),
       });
     } catch (error: any) {
       logger.error('Failed to fetch ticket {TicketId}: {Error}', { TicketId: getParam(req.params.id), Error: error.message });
@@ -186,10 +143,15 @@ export class TicketController {
       }
 
       // User requirement: Any ticket submitted by any user is sent to technical teams
+      // New tickets always start as Open / New; status, stage and requester come from the
+      // workflow and the session, never from the submitted form.
+      const { status: _s, stage: _st, requesterId: _r, createdBy: _c, assigneeId: _a, ...body } = req.body || {};
       const ticketPayload = {
-        ...req.body,
+        ...body,
+        status: 'Open',
+        stage: 'New',
         assignedTeam: 'Technical Team',
-        teamId: req.body.teamId || 'tech-team',
+        teamId: body.teamId || 'tech-team',
       };
 
       const newTicket = await TicketModel.createTicket(ticketPayload, actor);
@@ -224,6 +186,14 @@ export class TicketController {
     try {
       const id = getParam(req.params.id);
       const actor = TicketController.getActor(req);
+      const access = await getTicketAccess(req);
+      if (!access.isTechnical) {
+        const existing = await TicketModel.getTicketById(id);
+        if (!existing || !canViewTicket(existing, access)) {
+          return res.status(404).json({ success: false, error: `Ticket '${id}' not found for update` });
+        }
+        return forbidTicket(res, 'change ticket status, priority or assignment');
+      }
 
       const updated = await TicketModel.updateTicket(id, req.body, actor);
       if (!updated) {
@@ -243,7 +213,7 @@ export class TicketController {
 
       res.status(200).json({
         success: true,
-        data: updated,
+        data: sanitizeTicketFor(updated, access),
       });
     } catch (error: any) {
       logger.error('Error updating ticket {TicketId}: {Error}', { TicketId: getParam(req.params.id), Error: error.message });
@@ -262,6 +232,9 @@ export class TicketController {
     try {
       const id = getParam(req.params.id);
       const actor = TicketController.getActor(req);
+      if (!(await getTicketAccess(req)).isAdmin) {
+        return forbidTicket(res, 'delete tickets');
+      }
 
       const deleted = await TicketModel.deleteTicket(id);
       if (!deleted) {
@@ -308,6 +281,14 @@ export class TicketController {
       }
 
       const isNote = Boolean(isInternalNote !== undefined ? isInternalNote : isInternal);
+      const access = await getTicketAccess(req);
+      const existing = await TicketModel.getTicketById(id);
+      if (!existing || !canViewTicket(existing, access)) {
+        return res.status(404).json({ success: false, error: `Ticket '${id}' not found` });
+      }
+      if (isNote && !access.isTechnical) {
+        return forbidTicket(res, 'post internal staff notes');
+      }
       const comment = await TicketModel.addComment(id, content, isNote, actor);
 
       if (!comment) {
@@ -352,6 +333,12 @@ export class TicketController {
           success: false,
           error: 'File name is required',
         });
+      }
+
+      const access = await getTicketAccess(req);
+      const existing = await TicketModel.getTicketById(id);
+      if (!existing || !canViewTicket(existing, access)) {
+        return res.status(404).json({ success: false, error: `Ticket '${id}' not found` });
       }
 
       const attachment = await TicketModel.addAttachment(
@@ -418,6 +405,9 @@ export class TicketController {
    */
   static async createTeam(req: AuthRequest, res: Response) {
     try {
+      if (!(await getTicketAccess(req)).canManageTeams) {
+        return forbidTicket(res, 'manage support teams');
+      }
       const { name, nameAr, type, description, descriptionAr, memberUserIds, leadUserId } = req.body;
 
       if (!name || !name.trim()) {
@@ -463,6 +453,9 @@ export class TicketController {
    */
   static async updateTeam(req: AuthRequest, res: Response) {
     try {
+      if (!(await getTicketAccess(req)).canManageTeams) {
+        return forbidTicket(res, 'manage support teams');
+      }
       const teamId = getParam(req.params.teamId);
       const { name, nameAr, type, description, descriptionAr, memberUserIds, leadUserId } = req.body;
 
@@ -504,7 +497,14 @@ export class TicketController {
    */
   static async deleteTeam(req: AuthRequest, res: Response) {
     try {
+      if (!(await getTicketAccess(req)).canManageTeams) {
+        return forbidTicket(res, 'manage support teams');
+      }
       const teamId = getParam(req.params.teamId);
+      // Every new ticket is routed to the built-in technical team; it cannot be deleted.
+      if (teamId === 'tech-team') {
+        return res.status(400).json({ success: false, error: 'The built-in Technical Team cannot be deleted.' });
+      }
       const success = await TicketModel.deleteSupportTeam(teamId);
 
       if (!success) {
@@ -528,6 +528,9 @@ export class TicketController {
    */
   static async assignUserToTeam(req: AuthRequest, res: Response) {
     try {
+      if (!(await getTicketAccess(req)).canManageTeams) {
+        return forbidTicket(res, 'manage support teams');
+      }
       const teamId = getParam(req.params.teamId);
       const { userId } = req.body;
 
@@ -548,6 +551,9 @@ export class TicketController {
    */
   static async removeUserFromTeam(req: AuthRequest, res: Response) {
     try {
+      if (!(await getTicketAccess(req)).canManageTeams) {
+        return forbidTicket(res, 'manage support teams');
+      }
       const teamId = getParam(req.params.teamId);
       const userId = getParam(req.params.userId);
       const success = await TicketModel.removeUserFromTeam(teamId, userId);
@@ -563,7 +569,13 @@ export class TicketController {
    */
   static async getSettings(req: AuthRequest, res: Response) {
     try {
-      const settings = await TicketModel.getSystemSettings();
+      const settings: any = await TicketModel.getSystemSettings();
+      const access = await getTicketAccess(req);
+      // The external log collector key is a secret: only admins receive it.
+      if (!access.isAdmin) {
+        const { serilogApiKey, ...rest } = settings;
+        return res.status(200).json({ success: true, data: { ...rest, hasSerilogApiKey: Boolean(serilogApiKey) } });
+      }
       res.status(200).json({
         success: true,
         data: settings,
@@ -582,6 +594,9 @@ export class TicketController {
    */
   static async updateSettings(req: AuthRequest, res: Response) {
     try {
+      if (!(await getTicketAccess(req)).isAdmin) {
+        return forbidTicket(res, 'change system settings');
+      }
       const updated = await TicketModel.updateSystemSettings(req.body);
       res.status(200).json({
         success: true,

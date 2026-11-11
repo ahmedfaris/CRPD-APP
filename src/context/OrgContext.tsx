@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { useAuth } from './AuthContext';
 
 export interface TreeNode {
   id: string;
@@ -64,10 +65,28 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       });
     });
 
+    // A unit whose parent chain loops back to itself (possible in data saved before loop
+    // checks existed) would never be reachable from a root and would vanish from the tree.
+    // Show such units at the top level so they can still be found and fixed.
+    const parentIdOf = new Map(flatList.map(item => [item.id, item.parentId || null]));
+    const isInLoop = (id: any) => {
+      const seen = new Set();
+      let cursor = parentIdOf.get(id);
+      while (cursor) {
+        if (cursor === id) return true;
+        if (seen.has(cursor)) return false;
+        seen.add(cursor);
+        cursor = parentIdOf.get(cursor);
+      }
+      return false;
+    };
+
     // Second pass
     flatList.forEach(item => {
       const node = nodeMap.get(item.id);
-      if (item.parentId) {
+      if (item.parentId && isInLoop(item.id)) {
+        roots.push(node);
+      } else if (item.parentId) {
         const parent = nodeMap.get(item.parentId);
         if (parent) {
           parent.children.push(node);
@@ -176,9 +195,16 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Load whenever a user signs in (the first request happens before login and is rejected);
+  // clear on sign-out.
+  const { currentUser } = useAuth();
   useEffect(() => {
+    if (!currentUser) {
+      setOrgData([]);
+      return;
+    }
     fetchOrgData();
-  }, []);
+  }, [currentUser?.uid]);
 
   const getAllDepartments = (): OrgDepartmentItem[] => {
     const depts: OrgDepartmentItem[] = [];
