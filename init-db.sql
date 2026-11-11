@@ -244,7 +244,7 @@ CREATE TABLE IF NOT EXISTS assets (
 
 CREATE TABLE IF NOT EXISTS maintenance (
   id SERIAL PRIMARY KEY,
-  asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+  asset_id INTEGER NOT NULL REFERENCES electronic_devices(id) ON DELETE CASCADE,
   maintenance_type TEXT NOT NULL,
   maintenance_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   maintenance_requester_name TEXT NOT NULL,

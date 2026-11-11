@@ -316,7 +316,7 @@ export async function initTicketTables(): Promise<void> {
         -- Maintenance Table
         CREATE TABLE IF NOT EXISTS maintenance (
           id SERIAL PRIMARY KEY,
-          asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+          asset_id INTEGER NOT NULL REFERENCES electronic_devices(id) ON DELETE CASCADE,
           maintenance_type TEXT NOT NULL,
           maintenance_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
           maintenance_requester_name TEXT NOT NULL,
@@ -337,6 +337,29 @@ export async function initTicketTables(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_assets_code ON assets(asset_code);
         CREATE INDEX IF NOT EXISTS idx_assets_dept ON assets(department);
         CREATE INDEX IF NOT EXISTS idx_maintenance_asset_id ON maintenance(asset_id);
+
+        -- Migration: older databases linked maintenance.asset_id to the legacy assets table, but
+        -- the app records maintenance against electronic_devices. Re-point the foreign key.
+        -- NOT VALID keeps any historic rows; new rows are checked against electronic_devices.
+        DO $$
+        DECLARE c RECORD;
+        BEGIN
+          FOR c IN
+            SELECT conname FROM pg_constraint
+            WHERE conrelid = 'maintenance'::regclass AND contype = 'f'
+              AND confrelid = 'assets'::regclass
+          LOOP
+            EXECUTE format('ALTER TABLE maintenance DROP CONSTRAINT %I', c.conname);
+          END LOOP;
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conrelid = 'maintenance'::regclass AND contype = 'f'
+              AND confrelid = 'electronic_devices'::regclass
+          ) THEN
+            ALTER TABLE maintenance ADD CONSTRAINT maintenance_asset_id_device_fkey
+              FOREIGN KEY (asset_id) REFERENCES electronic_devices(id) ON DELETE CASCADE NOT VALID;
+          END IF;
+        END $$;
         CREATE INDEX IF NOT EXISTS idx_maintenance_ticket_id ON maintenance(ticket_id);
         CREATE INDEX IF NOT EXISTS idx_maintenance_requester_id ON maintenance(requester_id);
 

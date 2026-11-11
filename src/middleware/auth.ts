@@ -140,7 +140,7 @@ export const requireAuth = async (
  * Looks up the caller's current role and permissions from the database (not from
  * the token, so role changes and removals take effect immediately).
  */
-export async function getEffectivePermissions(uid: string | undefined): Promise<{ role: string; email: string; permissions: string[] } | null> {
+export async function getEffectivePermissions(uid: string | undefined): Promise<{ role: string; email: string; userType: string; department: string; permissions: string[] } | null> {
   if (!uid) return null;
   const [row] = await db.select().from(users).where(eq(users.uid, String(uid)));
   if (!row) return null;
@@ -154,7 +154,7 @@ export async function getEffectivePermissions(uid: string | undefined): Promise<
   if (roleLower === 'admin' || roleLower === 'administrator' || row.email?.toLowerCase() === 'admin@system.local') {
     permissions.unshift('*');
   }
-  return { role, email: row.email, permissions };
+  return { role, email: row.email, userType: row.userType || '', department: row.department || '', permissions };
 }
 
 /**

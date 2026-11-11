@@ -108,29 +108,20 @@ export function getDeviceCodePrefix(deviceType?: string, category?: string): str
  * e.g. PR-001, PR-002, PC-001, PC-002
  */
 export async function generateNextDeviceCode(
-  department: string,
+  _department: string,
   deviceType?: string,
   category?: string
 ): Promise<string> {
+  // Device codes must be unique across the organization (device_code is UNIQUE in the
+  // database), so the sequence runs per type prefix over ALL devices, not per department.
+  // Numbering per department produced duplicates such as PC-001 in IT and in Finance.
   const prefix = getDeviceCodePrefix(deviceType, category);
-  const normDept = (department || '').trim().toLowerCase();
-
-  const allDevices = await db.select().from(electronicDevices);
-  const deptDevices = allDevices.filter(d => {
-    const dDept = (d.department || '').trim().toLowerCase();
-    const dDeptAr = (d.departmentAr || '').trim().toLowerCase();
-    return (
-      dDept === normDept ||
-      dDeptAr === normDept ||
-      (normDept && (dDept.includes(normDept) || normDept.includes(dDept)))
-    );
-  });
+  const allDevices = await db.select({ deviceCode: electronicDevices.deviceCode }).from(electronicDevices);
 
   let maxSeq = 0;
   const regex = new RegExp(`^${prefix}-(\\d+)$`, 'i');
-  for (const d of deptDevices) {
-    if (!d.deviceCode) continue;
-    const match = d.deviceCode.trim().match(regex);
+  for (const d of allDevices) {
+    const match = d.deviceCode?.trim().match(regex);
     if (match && match[1]) {
       const num = parseInt(match[1], 10);
       if (!isNaN(num) && num > maxSeq) {
@@ -139,8 +130,7 @@ export async function generateNextDeviceCode(
     }
   }
 
-  const nextSeq = maxSeq + 1;
-  return `${prefix}-${String(nextSeq).padStart(3, '0')}`;
+  return `${prefix}-${String(maxSeq + 1).padStart(3, '0')}`;
 }
 
 /**

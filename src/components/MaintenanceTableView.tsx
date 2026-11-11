@@ -123,7 +123,7 @@ export const MaintenanceTableView: React.FC<MaintenanceTableViewProps> = ({
         dataUrl: formDocumentData || undefined
       } : null;
 
-      await createMaintenanceTableRecord({
+      const createRes = await createMaintenanceTableRecord({
         assetId: Number(formAssetId),
         maintenanceType: formMaintenanceType,
         maintenanceDate: new Date(formMaintenanceDate).toISOString(),
@@ -135,6 +135,11 @@ export const MaintenanceTableView: React.FC<MaintenanceTableViewProps> = ({
         status: 'Completed',
         performedBy: 'Technical Support Team'
       });
+
+      if (!createRes.success) {
+        alert((language === 'ar' ? 'تعذر حفظ سجل الصيانة: ' : 'The maintenance record was not saved: ') + (createRes.error || ''));
+        return;
+      }
 
       setIsAddModalOpen(false);
       setFormDescription('');
@@ -481,7 +486,10 @@ export const MaintenanceTableView: React.FC<MaintenanceTableViewProps> = ({
                             <button
                               onClick={async () => {
                                 if (confirm(language === 'ar' ? `هل أنت متأكد من حذف سجل الصيانة #${rec.id}؟` : `Delete maintenance record #${rec.id}?`)) {
-                                  await deleteMaintenanceTableRecord(rec.id);
+                                  const delRes = await deleteMaintenanceTableRecord(rec.id);
+                                  if (!delRes.success) {
+                                    alert((language === 'ar' ? 'تعذر حذف السجل: ' : 'The record was not deleted: ') + (delRes.error || ''));
+                                  }
                                 }
                               }}
                               className="p-1.5 rounded-lg bg-slate-700/60 hover:bg-rose-900/60 text-slate-400 hover:text-rose-400 transition"

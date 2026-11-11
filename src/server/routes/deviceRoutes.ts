@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { requireAuth, AuthRequest } from '../../middleware/auth.ts';
+import { getDeviceAccess, forbid, requireDeviceManager, requireDeviceDeleter } from '../utils/deviceAccess.ts';
 import { db } from '../../db/index.ts';
 import { electronicDevices } from '../../db/schema.ts';
 import { eq, desc, ilike, or } from 'drizzle-orm';
@@ -19,6 +20,19 @@ import {
 } from '../services/deviceFolderService.ts';
 
 const router = Router();
+
+/** Parse a numeric :id route parameter; responds 400 and returns null when invalid. */
+function parseDeviceId(req: AuthRequest, res: Response): number | null {
+  const raw = String(req.params.id ?? '');
+  if (!/^\d+$/.test(raw)) {
+    res.status(400).json({ error: 'Invalid device ID' });
+    return null;
+  }
+  return parseInt(raw, 10);
+}
+
+const isUniqueViolation = (err: any) =>
+  err?.code === '23505' || err?.cause?.code === '23505' || /duplicate key|unique constraint/i.test(String(err?.cause?.message || err?.message || ''));
 
 // Startup initialization: seed org hierarchy & sync folders in background
 let isInitialized = false;
@@ -102,8 +116,13 @@ router.get('/folders/download', requireAuth, async (req: AuthRequest, res) => {
     const archiveRoot = path.resolve(ASSET_ARCHIVE_STORAGE_DIR);
     const legacyRoot = path.resolve(path.join(process.cwd(), 'organization_devices'));
     
-    // Security check: must reside inside ASSET_ARCHIVE_STORAGE_DIR or legacy folder
-    if (!resolved.startsWith(archiveRoot) && !resolved.startsWith(legacyRoot)) {
+    // Security check: must reside inside ASSET_ARCHIVE_STORAGE_DIR or the legacy folder.
+    // (A plain startsWith() also matched sibling folders such as "asset archive-other".)
+    const isInside = (root: string) => {
+      const rel = path.relative(root, resolved);
+      return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+    };
+    if (!isInside(archiveRoot) && !isInside(legacyRoot)) {
       return res.status(403).json({ error: 'Access forbidden: Path outside asset archive storage' });
     }
 
@@ -131,7 +150,7 @@ router.get('/folders/download', requireAuth, async (req: AuthRequest, res) => {
 });
 
 // POST /api/devices/sync-folders - Trigger disk folder synchronization for all devices
-router.post('/sync-folders', requireAuth, async (req: AuthRequest, res) => {
+router.post('/sync-folders', requireAuth, requireDeviceManager, async (req: AuthRequest, res) => {
   try {
     const result = await syncAllExistingDevicesToDisk();
     res.json({ success: true, count: result.count, paths: result.paths });
@@ -189,7 +208,8 @@ router.get('/', requireAuth, async (req: AuthRequest, res) => {
 // GET /api/devices/:id - Get single device
 router.get('/:id', requireAuth, async (req: AuthRequest, res) => {
   try {
-    const id = parseInt(req.params.id as string, 10);
+    const id = parseDeviceId(req, res);
+    if (id === null) return;
     const [device] = await db.select().from(electronicDevices).where(eq(electronicDevices.id, id));
 
     if (!device) {
@@ -217,13 +237,38 @@ router.post('/', requireAuth, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Required fields missing: category, deviceType, brand, model, department' });
     }
 
-    const effectiveDept = body.department || req.user?.department || 'Information Technology';
-    let generatedCode = body.deviceCode;
-    if (!generatedCode || generatedCode.startsWith('DEV-') || generatedCode.includes('XXX')) {
-      generatedCode = await generateNextDeviceCode(effectiveDept, body.deviceType, body.category);
+    // Ordinary users may only register devices for their own department.
+    const access = await getDeviceAccess(req);
+    if (!access.canManage) {
+      const own = (access.department || '').trim().toLowerCase();
+      const requested = String(body.department || '').trim().toLowerCase();
+      const requestedAr = String(body.departmentAr || '').trim().toLowerCase();
+      if (!own || (requested !== own && requestedAr !== own)) {
+        return forbid(res, 'register assets for another department');
+      }
     }
 
-    const [created] = await db.insert(electronicDevices).values({
+    const effectiveDept = body.department || req.user?.department || 'Information Technology';
+    // Standard-format codes (e.g. "PC-004") sent by the form are only a preview: the server
+    // always allocates those itself. Any other non-placeholder value is a custom code.
+    const requestedCode = String(body.deviceCode || '').trim();
+    const isAutoFormat = /^[A-Z]{2,4}-\d+$/i.test(requestedCode);
+    const customCode = requestedCode && !isAutoFormat && !requestedCode.startsWith('DEV-') && !requestedCode.includes('XXX')
+      ? requestedCode
+      : null;
+    if (customCode) {
+      const [clash] = await db.select({ id: electronicDevices.id }).from(electronicDevices).where(eq(electronicDevices.deviceCode, customCode));
+      if (clash) {
+        return res.status(409).json({ error: `Asset code ${customCode} is already in use.`, code: 'DUPLICATE_CODE' });
+      }
+    }
+
+    // Codes are unique across the whole organization; retry if another request took the same code.
+    let created: any;
+    for (let attempt = 0; attempt < 5 && !created; attempt++) {
+      const generatedCode = customCode || await generateNextDeviceCode(effectiveDept, body.deviceType, body.category);
+      try {
+        [created] = await db.insert(electronicDevices).values({
       deviceCode: generatedCode,
       category: body.category,
       deviceType: body.deviceType,
@@ -248,6 +293,17 @@ router.post('/', requireAuth, async (req: AuthRequest, res) => {
       notes: body.notes || null,
       purchaseReceipt: body.purchaseReceipt || null,
     }).returning();
+      } catch (insertErr: any) {
+        if (isUniqueViolation(insertErr) && !customCode) continue;
+        if (isUniqueViolation(insertErr)) {
+          return res.status(409).json({ error: `Asset code ${generatedCode} is already in use.`, code: 'DUPLICATE_CODE' });
+        }
+        throw insertErr;
+      }
+    }
+    if (!created) {
+      return res.status(409).json({ error: 'Could not allocate a unique asset code. Please try again.', code: 'DUPLICATE_CODE' });
+    }
 
     // Automatically create folder for this device on disk:
     // Root / Organization / Directorate / Department / [Division] / DeviceFolder (begins with device code)
@@ -303,9 +359,10 @@ router.post('/', requireAuth, async (req: AuthRequest, res) => {
 });
 
 // PUT /api/devices/:id - Update device
-router.put('/:id', requireAuth, async (req: AuthRequest, res) => {
+router.put('/:id', requireAuth, requireDeviceManager, async (req: AuthRequest, res) => {
   try {
-    const id = parseInt(req.params.id as string, 10);
+    const id = parseDeviceId(req, res);
+    if (id === null) return;
     const body = req.body;
 
     const [existing] = await db.select().from(electronicDevices).where(eq(electronicDevices.id, id));
@@ -383,9 +440,10 @@ router.put('/:id', requireAuth, async (req: AuthRequest, res) => {
 });
 
 // POST /api/devices/:id/transfer - Transfer device to a different department
-router.post('/:id/transfer', requireAuth, async (req: AuthRequest, res) => {
+router.post('/:id/transfer', requireAuth, requireDeviceManager, async (req: AuthRequest, res) => {
   try {
-    const id = parseInt(req.params.id as string, 10);
+    const id = parseDeviceId(req, res);
+    if (id === null) return;
     const { newDepartment, newDepartmentAr, newDivision, reason, transferDate } = req.body;
 
     if (!newDepartment) {
@@ -467,7 +525,8 @@ router.post('/:id/transfer', requireAuth, async (req: AuthRequest, res) => {
 // GET /api/devices/:id/folder - Inspect folder hierarchy and files for a device
 router.get('/:id/folder', requireAuth, async (req: AuthRequest, res) => {
   try {
-    const id = parseInt(req.params.id as string, 10);
+    const id = parseDeviceId(req, res);
+    if (id === null) return;
     const [device] = await db.select().from(electronicDevices).where(eq(electronicDevices.id, id));
 
     if (!device) {
@@ -517,9 +576,10 @@ router.get('/:id/folder', requireAuth, async (req: AuthRequest, res) => {
 });
 
 // POST /api/devices/:id/folder/upload - Upload a file directly into the device's folder
-router.post('/:id/folder/upload', requireAuth, async (req: AuthRequest, res) => {
+router.post('/:id/folder/upload', requireAuth, requireDeviceManager, async (req: AuthRequest, res) => {
   try {
-    const id = parseInt(req.params.id as string, 10);
+    const id = parseDeviceId(req, res);
+    if (id === null) return;
     const [device] = await db.select().from(electronicDevices).where(eq(electronicDevices.id, id));
 
     if (!device) {
@@ -532,12 +592,13 @@ router.post('/:id/folder/upload', requireAuth, async (req: AuthRequest, res) => 
     }
 
     const folderRes = await createOrUpdateDeviceFolder(device);
-    const matches = fileDataUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-    if (!matches || matches.length !== 3) {
+    // data:[<media type>][;param=value]*;base64,<data>  (media types may contain dots, e.g. .docx/.xlsx)
+    const matches = fileDataUrl.match(/^data:([^;,]*)((?:;[^;,]*)*);base64,([\s\S]+)$/);
+    if (!matches) {
       return res.status(400).json({ error: 'Invalid data URL format' });
     }
 
-    const base64Data = matches[2];
+    const base64Data = matches[3];
     const buffer = Buffer.from(base64Data, 'base64');
     const sanitizedName = sanitizePathSegment(fileName);
     const targetFilePath = path.join(folderRes.folderPath, sanitizedName);
@@ -558,9 +619,10 @@ router.post('/:id/folder/upload', requireAuth, async (req: AuthRequest, res) => 
 });
 
 // POST /api/devices/:id/maintenance - Add a maintenance record
-router.post('/:id/maintenance', requireAuth, async (req: AuthRequest, res) => {
+router.post('/:id/maintenance', requireAuth, requireDeviceManager, async (req: AuthRequest, res) => {
   try {
-    const id = parseInt(req.params.id as string, 10);
+    const id = parseDeviceId(req, res);
+    if (id === null) return;
     const { date, type, description, performedBy, cost, status, notes } = req.body;
 
     if (!description || !type) {
@@ -612,9 +674,10 @@ router.post('/:id/maintenance', requireAuth, async (req: AuthRequest, res) => {
 });
 
 // DELETE /api/devices/:id - Delete device
-router.delete('/:id', requireAuth, async (req: AuthRequest, res) => {
+router.delete('/:id', requireAuth, requireDeviceDeleter, async (req: AuthRequest, res) => {
   try {
-    const id = parseInt(req.params.id as string, 10);
+    const id = parseDeviceId(req, res);
+    if (id === null) return;
     const [deleted] = await db.delete(electronicDevices).where(eq(electronicDevices.id, id)).returning();
 
     if (!deleted) {

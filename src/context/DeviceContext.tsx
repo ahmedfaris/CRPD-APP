@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { ElectronicDevice, DeviceMaintenanceItem, DeviceDepartmentHistoryItem, MaintenanceRecord } from '../types';
-import { INITIAL_DEVICES } from '../data/mockDevices';
+import { useAuth } from './AuthContext';
 
 interface DeviceFilters {
   category?: string;
@@ -68,15 +68,28 @@ export function calculateWarranty(startDateStr: string, periodStr: string): { ex
   }
 }
 
+/** Extract a readable error message from a failed API response. */
+async function readApiError(res: Response): Promise<string> {
+  try {
+    const json = await res.json();
+    return json?.error || json?.message || `Request failed (HTTP ${res.status})`;
+  } catch {
+    return `Request failed (HTTP ${res.status})`;
+  }
+}
+
 export function DeviceProvider({ children }: { children: ReactNode }) {
+  const { currentUser } = useAuth();
   const [devices, setDevices] = useState<ElectronicDevice[]>(() => {
     try {
+      // Cache of the last list loaded from the server (never sample data).
       const saved = localStorage.getItem('crpd_electronic_devices_v1');
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed.filter((d: any) => !String(d?.id ?? '').startsWith('local_'));
       }
     } catch {}
-    return INITIAL_DEVICES;
+    return [];
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -184,10 +197,18 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, []);
 
+  // Load from the server whenever a user signs in (the first load happens before login and is
+  // rejected with 401); clear the list on sign-out so nothing stale is shown.
   useEffect(() => {
+    if (!currentUser) {
+      setDevices([]);
+      setMaintenanceRecords([]);
+      try { localStorage.removeItem('crpd_electronic_devices_v1'); } catch {}
+      return;
+    }
     fetchDevices();
     fetchMaintenanceRecords();
-  }, [fetchDevices, fetchMaintenanceRecords]);
+  }, [currentUser?.uid, fetchDevices, fetchMaintenanceRecords]);
 
   const addDevice = async (deviceData: Partial<ElectronicDevice>): Promise<{ success: boolean; data?: ElectronicDevice; error?: string }> => {
     const token = localStorage.getItem('auth_token');
@@ -213,74 +234,10 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
           return { success: true, data: enriched };
         }
       }
+      return { success: false, error: await readApiError(res) };
     } catch (e: any) {
-      console.warn('Backend addDevice failed, applying local fallback:', e.message);
+      return { success: false, error: e?.message || 'Network error: could not reach the server.' };
     }
-
-    // Local fallback creation
-    let code = deviceData.deviceCode;
-    if (!code || code.startsWith('DEV-') || code.includes('XXX')) {
-      const t = (deviceData.deviceType || '').toLowerCase();
-      let prefix = 'DEV';
-      if (t.includes('printer') || t.includes('طابعة')) prefix = 'PR';
-      else if (t.includes('computer') || t.includes('pc') || t.includes('laptop') || t.includes('desktop') || t.includes('حاسوب') || t.includes('كمبيوتر')) prefix = 'PC';
-      else if (t.includes('scanner') || t.includes('ماسح')) prefix = 'SC';
-      else if (t.includes('screen') || t.includes('monitor') || t.includes('شاشة')) prefix = 'MN';
-      else if (t.includes('fingerprint') || t.includes('بصمة')) prefix = 'FP';
-      else if (t.includes('router') || t.includes('راوتر')) prefix = 'RT';
-      else if (t.includes('switch') || t.includes('سويتش')) prefix = 'SW';
-      else if (t.includes('access point') || t.includes('نقطة وصول') || t.includes('wifi')) prefix = 'AP';
-      else if (t.includes('server') || t.includes('خادم')) prefix = 'SR';
-      else if (t.includes('phone') || t.includes('هاتف')) prefix = 'PH';
-      else if (deviceData.category === 'network') prefix = 'NW';
-
-      const deptNorm = (deviceData.department || 'Information Technology').toLowerCase();
-      const deptDevs = devices.filter(d => (d.department || '').toLowerCase() === deptNorm || (d.departmentAr || '').toLowerCase() === deptNorm);
-      let maxSeq = 0;
-      const regex = new RegExp(`^${prefix}-(\\d+)$`, 'i');
-      for (const d of deptDevs) {
-        const match = d.deviceCode?.trim().match(regex);
-        if (match && match[1]) {
-          const num = parseInt(match[1], 10);
-          if (!isNaN(num) && num > maxSeq) maxSeq = num;
-        }
-      }
-      code = `${prefix}-${String(maxSeq + 1).padStart(3, '0')}`;
-    }
-
-    const newDev: ElectronicDevice = enrichDevice({
-      id: 'local_' + Date.now(),
-      deviceCode: code,
-      category: deviceData.category || 'electronic',
-      deviceType: deviceData.deviceType || 'Computer',
-      brand: deviceData.brand || 'Standard',
-      model: deviceData.model || 'Model',
-      serialNumber: deviceData.serialNumber || '',
-      dateOfPurchase: deviceData.dateOfPurchase || new Date().toISOString().split('T')[0],
-      warrantyStartDate: deviceData.warrantyStartDate || deviceData.dateOfPurchase || new Date().toISOString().split('T')[0],
-      warrantyPeriod: deviceData.warrantyPeriod || '24 Months',
-      department: deviceData.department || 'Information Technology',
-      departmentAr: deviceData.departmentAr || '',
-      status: deviceData.status || 'Operational',
-      ipAddress: deviceData.ipAddress || '',
-      macAddress: deviceData.macAddress || '',
-      location: deviceData.location || '',
-      assignedEmployee: deviceData.assignedEmployee || '',
-      departmentHistory: deviceData.departmentHistory || [],
-      maintenanceHistory: deviceData.maintenanceHistory || [],
-      notes: deviceData.notes || '',
-      purchaseReceipt: deviceData.purchaseReceipt,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    });
-
-    setDevices(prev => {
-      const next = [newDev, ...prev];
-      saveToStorage(next);
-      return next;
-    });
-
-    return { success: true, data: newDev };
   };
 
   const updateDevice = async (id: string | number, deviceData: Partial<ElectronicDevice>): Promise<{ success: boolean; data?: ElectronicDevice; error?: string }> => {
@@ -307,22 +264,10 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
           return { success: true, data: enriched };
         }
       }
+      return { success: false, error: await readApiError(res) };
     } catch (e: any) {
-      console.warn('Backend updateDevice failed, applying local fallback:', e.message);
+      return { success: false, error: e?.message || 'Network error: could not reach the server.' };
     }
-
-    setDevices(prev => {
-      const next = prev.map(d => {
-        if (d.id === String(id)) {
-          return enrichDevice({ ...d, ...deviceData, updatedAt: new Date().toISOString() });
-        }
-        return d;
-      });
-      saveToStorage(next);
-      return next;
-    });
-
-    return { success: true };
   };
 
   const transferDepartment = async (id: string | number, newDepartment: string, reason?: string, newDepartmentAr?: string): Promise<{ success: boolean; error?: string }> => {
@@ -349,38 +294,10 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
           return { success: true };
         }
       }
+      return { success: false, error: await readApiError(res) };
     } catch (e: any) {
-      console.warn('Backend transfer failed, applying local fallback:', e.message);
+      return { success: false, error: e?.message || 'Network error: could not reach the server.' };
     }
-
-    // Local fallback
-    setDevices(prev => {
-      const next = prev.map(d => {
-        if (d.id === String(id)) {
-          const historyItem: DeviceDepartmentHistoryItem = {
-            id: 'dh-' + Date.now(),
-            department: d.department,
-            departmentAr: d.departmentAr || d.department,
-            assignedDate: d.dateOfPurchase,
-            transferredDate: new Date().toISOString().split('T')[0],
-            transferredBy: 'Current User',
-            reason: reason || 'Departmental transfer'
-          };
-          return {
-            ...d,
-            department: newDepartment,
-            departmentAr: newDepartmentAr || d.departmentAr,
-            departmentHistory: [...d.departmentHistory, historyItem],
-            updatedAt: new Date().toISOString()
-          };
-        }
-        return d;
-      });
-      saveToStorage(next);
-      return next;
-    });
-
-    return { success: true };
   };
 
   const addMaintenanceRecord = async (id: string | number, record: Omit<DeviceMaintenanceItem, 'id'>): Promise<{ success: boolean; error?: string }> => {
@@ -407,32 +324,10 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
           return { success: true };
         }
       }
+      return { success: false, error: await readApiError(res) };
     } catch (e: any) {
-      console.warn('Backend maintenance failed, applying local fallback:', e.message);
+      return { success: false, error: e?.message || 'Network error: could not reach the server.' };
     }
-
-    // Local fallback
-    setDevices(prev => {
-      const next = prev.map(d => {
-        if (d.id === String(id)) {
-          const newRecord: DeviceMaintenanceItem = {
-            ...record,
-            id: 'mh-' + Date.now()
-          };
-          return {
-            ...d,
-            maintenanceHistory: [...d.maintenanceHistory, newRecord],
-            status: record.status === 'In Progress' ? 'Under Maintenance' : d.status,
-            updatedAt: new Date().toISOString()
-          };
-        }
-        return d;
-      });
-      saveToStorage(next);
-      return next;
-    });
-
-    return { success: true };
   };
 
   const deleteDevice = async (id: string | number): Promise<{ success: boolean; error?: string }> => {
@@ -451,17 +346,10 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         });
         return { success: true };
       }
+      return { success: false, error: await readApiError(res) };
     } catch (e: any) {
-      console.warn('Backend delete failed, applying local fallback:', e.message);
+      return { success: false, error: e?.message || 'Network error: could not reach the server.' };
     }
-
-    setDevices(prev => {
-      const next = prev.filter(d => d.id !== String(id));
-      saveToStorage(next);
-      return next;
-    });
-
-    return { success: true };
   };
 
   const createMaintenanceTableRecord = async (data: Partial<MaintenanceRecord>): Promise<{ success: boolean; data?: any; error?: string }> => {

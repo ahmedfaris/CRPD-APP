@@ -262,7 +262,8 @@ export const assets = pgTable('assets', {
  */
 export const maintenance = pgTable('maintenance', {
   id: serial('id').primaryKey(),
-  assetId: integer('asset_id').references(() => assets.id).notNull(),
+  // Maintenance records belong to registered devices (electronic_devices), which is what the UI sends.
+  assetId: integer('asset_id').references(() => electronicDevices.id, { onDelete: 'cascade' }).notNull(),
   maintenanceType: text('maintenance_type').notNull(), // Routine, Hardware Repair, Component Replacement, Emergency, Inspection
   maintenanceDate: timestamp('maintenance_date').defaultNow().notNull(),
   maintenanceRequesterName: text('maintenance_requester_name').notNull(), // Requester name connected to user who generated ticket

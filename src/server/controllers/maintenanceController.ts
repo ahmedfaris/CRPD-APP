@@ -2,7 +2,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../../middleware/auth.ts';
 import { db } from '../../db/index.ts';
-import { maintenance, assets, tickets, users } from '../../db/schema.ts';
+import { maintenance, assets, tickets, users, electronicDevices } from '../../db/schema.ts';
 import { eq, desc, and } from 'drizzle-orm';
 import { logger } from '../utils/logger.ts';
 import { TicketRequestFileService } from '../services/ticketRequestFileService.ts';
@@ -51,28 +51,28 @@ export class MaintenanceController {
       if (assetIdParam && !isNaN(Number(assetIdParam))) {
         records = await db.select({
           maintenance: maintenance,
-          asset: assets,
+          asset: electronicDevices,
         })
         .from(maintenance)
-        .leftJoin(assets, eq(maintenance.assetId, assets.id))
+        .leftJoin(electronicDevices, eq(maintenance.assetId, electronicDevices.id))
         .where(eq(maintenance.assetId, Number(assetIdParam)))
         .orderBy(desc(maintenance.maintenanceDate));
       } else if (ticketIdParam && !isNaN(Number(ticketIdParam))) {
         records = await db.select({
           maintenance: maintenance,
-          asset: assets,
+          asset: electronicDevices,
         })
         .from(maintenance)
-        .leftJoin(assets, eq(maintenance.assetId, assets.id))
+        .leftJoin(electronicDevices, eq(maintenance.assetId, electronicDevices.id))
         .where(eq(maintenance.ticketId, Number(ticketIdParam)))
         .orderBy(desc(maintenance.maintenanceDate));
       } else {
         records = await db.select({
           maintenance: maintenance,
-          asset: assets,
+          asset: electronicDevices,
         })
         .from(maintenance)
-        .leftJoin(assets, eq(maintenance.assetId, assets.id))
+        .leftJoin(electronicDevices, eq(maintenance.assetId, electronicDevices.id))
         .orderBy(desc(maintenance.maintenanceDate));
       }
 
@@ -89,8 +89,8 @@ export class MaintenanceController {
         return {
           id: r.maintenance.id,
           assetId: r.maintenance.assetId,
-          assetName: r.asset?.name || `Asset #${r.maintenance.assetId}`,
-          assetCode: r.asset?.assetCode || `AST-${r.maintenance.assetId}`,
+          assetName: r.asset ? `${r.asset.brand} ${r.asset.model}`.trim() : `Asset #${r.maintenance.assetId}`,
+          assetCode: r.asset?.deviceCode || `AST-${r.maintenance.assetId}`,
           deviceType: r.asset?.deviceType || 'Hardware',
           brand: r.asset?.brand,
           model: r.asset?.model,
@@ -135,10 +135,10 @@ export class MaintenanceController {
 
       const rows = await db.select({
         maintenance: maintenance,
-        asset: assets,
+        asset: electronicDevices,
       })
       .from(maintenance)
-      .leftJoin(assets, eq(maintenance.assetId, assets.id))
+      .leftJoin(electronicDevices, eq(maintenance.assetId, electronicDevices.id))
       .where(eq(maintenance.id, id))
       .limit(1);
 
@@ -159,8 +159,8 @@ export class MaintenanceController {
       const formatted = {
         id: r.maintenance.id,
         assetId: r.maintenance.assetId,
-        assetName: r.asset?.name || `Asset #${r.maintenance.assetId}`,
-        assetCode: r.asset?.assetCode || `AST-${r.maintenance.assetId}`,
+        assetName: r.asset ? `${r.asset.brand} ${r.asset.model}`.trim() : `Asset #${r.maintenance.assetId}`,
+        assetCode: r.asset?.deviceCode || `AST-${r.maintenance.assetId}`,
         deviceType: r.asset?.deviceType || 'Hardware',
         brand: r.asset?.brand,
         model: r.asset?.model,
@@ -220,6 +220,11 @@ export class MaintenanceController {
 
       if (!maintenanceDescription) {
         return res.status(400).json({ success: false, error: 'maintenanceDescription is required' });
+      }
+
+      const [device] = await db.select({ id: electronicDevices.id }).from(electronicDevices).where(eq(electronicDevices.id, Number(assetId)));
+      if (!device) {
+        return res.status(404).json({ success: false, error: 'Asset not found' });
       }
 
       const requesterName = maintenanceRequesterName || actor.fullName || 'System User';

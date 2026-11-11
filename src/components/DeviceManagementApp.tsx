@@ -170,18 +170,15 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
     return category === 'network' ? 'NW' : 'DEV';
   };
 
-  // Auto-calculated Asset ID: prefix (PR for printer, PC for Computer) + sequential device number for this department
+  // Auto-calculated Asset ID preview: prefix (PR for printer, PC for Computer) + next number.
+  // Codes are unique across the organization, so the sequence covers all devices; the server
+  // assigns the final code when saving.
   const calculatedAssetId = useMemo(() => {
     if (editingDevice) return editingDevice.deviceCode;
     const prefix = getDeviceCodePrefix(formDeviceType, formCategory);
-    const deptNorm = (formDepartment || '').toLowerCase();
-    const deptDevs = devices.filter(d => 
-      (d.department || '').toLowerCase() === deptNorm || 
-      (d.departmentAr || '').toLowerCase() === deptNorm
-    );
     let maxSeq = 0;
     const regex = new RegExp(`^${prefix}-(\\d+)$`, 'i');
-    for (const d of deptDevs) {
+    for (const d of devices) {
       const match = d.deviceCode?.trim().match(regex);
       if (match && match[1]) {
         const num = parseInt(match[1], 10);
@@ -440,6 +437,12 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
     setShowPledgeModal(true);
   };
 
+  // Show a server-side failure instead of pretending the change was saved
+  const showSaveError = (error?: string) => {
+    const prefix = language === 'ar' ? 'تعذر حفظ التغيير: ' : 'The change was not saved: ';
+    alert(prefix + (error || (language === 'ar' ? 'خطأ غير معروف' : 'Unknown error')));
+  };
+
   // Final execution of saving asset upon confirming the pledge: "اتعهد بصحة جميع معلومات الجهاز"
   const handleConfirmSaveDevice = async () => {
     if (!formBrand.trim() || !formModel.trim() || !formDepartment) return;
@@ -453,7 +456,7 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
       const resolvedDeptAr = matchedDept ? matchedDept.nameAr : (formDepartmentAr || undefined);
       const hierarchy = resolveHierarchyForDept(resolvedDeptEn, formDivision);
 
-      await updateDevice(editingDevice.id, {
+      const updateRes = await updateDevice(editingDevice.id, {
         category: formCategory,
         deviceType: formDeviceType,
         brand: formBrand.trim(),
@@ -475,6 +478,11 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
         status: formStatus,
         purchaseReceipt: formPurchaseReceipt || undefined
       });
+      if (!updateRes.success) {
+        setShowPledgeModal(false);
+        showSaveError(updateRes.error);
+        return;
+      }
       if (viewDeviceModal && viewDeviceModal.id === editingDevice.id) {
         setViewDeviceModal(prev => prev ? {
           ...prev,
@@ -511,7 +519,7 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
       const resolvedDeptAr = matchedDept ? matchedDept.nameAr : (formDepartmentAr || undefined);
       const hierarchy = resolveHierarchyForDept(resolvedDeptEn, formDivision);
 
-      await addDevice({
+      const addRes = await addDevice({
         deviceCode: calculatedAssetId,
         category: formCategory,
         deviceType: formDeviceType,
@@ -536,6 +544,11 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
         maintenanceHistory: [],
         purchaseReceipt: formPurchaseReceipt || undefined
       });
+      if (!addRes.success) {
+        setShowPledgeModal(false);
+        showSaveError(addRes.error);
+        return;
+      }
     }
 
     setShowPledgeModal(false);
@@ -569,7 +582,11 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
     const targetDeptEn = matched ? matched.nameEn : transferTargetDept;
     const targetDeptAr = matched ? matched.nameAr : (transferTargetDeptAr || transferTargetDept);
 
-    await transferDepartment(transferModalDevice.id, targetDeptEn, transferReason, targetDeptAr);
+    const transferRes = await transferDepartment(transferModalDevice.id, targetDeptEn, transferReason, targetDeptAr);
+    if (!transferRes.success) {
+      showSaveError(transferRes.error);
+      return;
+    }
     
     // Update active view modal if open
     if (viewDeviceModal && viewDeviceModal.id === transferModalDevice.id) {
@@ -620,7 +637,11 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
       notes: maintNotes.trim() || undefined
     };
 
-    await addMaintenanceRecord(maintenanceModalDevice.id, newRecord);
+    const maintRes = await addMaintenanceRecord(maintenanceModalDevice.id, newRecord);
+    if (!maintRes.success) {
+      showSaveError(maintRes.error);
+      return;
+    }
 
     if (viewDeviceModal && viewDeviceModal.id === maintenanceModalDevice.id) {
       setViewDeviceModal(prev => prev ? {
@@ -639,7 +660,11 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
       ? `هل أنت متأكد من حذف الجهاز ${dev.deviceCode} (${dev.brand} ${dev.model})؟` 
       : `Are you sure you want to delete device ${dev.deviceCode} (${dev.brand} ${dev.model})?`;
     if (window.confirm(confirmMsg)) {
-      await deleteDevice(dev.id);
+      const delRes = await deleteDevice(dev.id);
+      if (!delRes.success) {
+        showSaveError(delRes.error);
+        return;
+      }
       if (viewDeviceModal?.id === dev.id) {
         setViewDeviceModal(null);
       }
@@ -2125,7 +2150,7 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
                     </span>
                   </div>
                   <span className="text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800/60 font-bold">
-                    {language === 'ar' ? `تسلسل مرقم لقسم: ${formDepartment}` : `Sequence for: ${formDepartment}`}
+                    {language === 'ar' ? 'تسلسل موحّد على مستوى المؤسسة' : 'Organization-wide sequence'}
                   </span>
                 </div>
                 <div className="flex items-center gap-3">
@@ -2134,8 +2159,8 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
                   </div>
                   <div className="text-xs text-slate-300 leading-relaxed">
                     {language === 'ar'
-                      ? `رمز الجهاز (${getDeviceCodePrefix(formDeviceType, formCategory)}) + تسلسل عددي تتابعي خاص بقسم الموظف. يُنشأ مجلد الأصل بهذا المعرّف في أرشيف الأصول.`
-                      : `Device code (${getDeviceCodePrefix(formDeviceType, formCategory)}) + sequential number for this department. The asset folder is named after this ID in asset archive.`}
+                      ? `رمز الجهاز (${getDeviceCodePrefix(formDeviceType, formCategory)}) + تسلسل عددي فريد على مستوى المؤسسة (يُثبَّت الرقم النهائي عند الحفظ). يُنشأ مجلد الأصل بهذا المعرّف في أرشيف الأصول.`
+                      : `Device code (${getDeviceCodePrefix(formDeviceType, formCategory)}) + a sequence number unique across the organization (final number assigned on save). The asset folder is named after this ID in asset archive.`}
                   </div>
                 </div>
               </div>
