@@ -1,4 +1,24 @@
 import React, { useState, useEffect } from 'react';
+
+/** Random temporary password that satisfies the password policy (12+ chars, upper, lower, digit, symbol). */
+function generateTemporaryPassword(): string {
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ', lower = 'abcdefghijkmnpqrstuvwxyz', digits = '23456789', symbols = '!@#$%&*?';
+  const all = upper + lower + digits + symbols;
+  const pick = (chars: string) => {
+    const buf = new Uint32Array(1);
+    crypto.getRandomValues(buf);
+    return chars[buf[0] % chars.length];
+  };
+  const chars = [pick(upper), pick(lower), pick(digits), pick(symbols)];
+  while (chars.length < 14) chars.push(pick(all));
+  for (let i = chars.length - 1; i > 0; i--) {
+    const buf = new Uint32Array(1);
+    crypto.getRandomValues(buf);
+    const j = buf[0] % (i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
+}
 import { useLanguage } from '../context/LanguageContext';
 import { useAuth } from '../context/AuthContext';
 import { useOrg } from '../context/OrgContext';
@@ -28,7 +48,8 @@ export function CreateUserModal({ onClose }: CreateUserModalProps) {
   const [newDept, setNewDept] = useState('');
   const [newRole, setNewRole] = useState<ApplicationRole>('Employee');
   const [newUserType, setNewUserType] = useState<UserType>('Operator');
-  const [newPass, setNewPass] = useState('SuperSecret@2026!');
+  // A fresh random temporary password for every new account (users must change it at first login).
+  const [newPass, setNewPass] = useState<string>(() => generateTemporaryPassword());
   const [createError, setCreateError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 

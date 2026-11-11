@@ -7,6 +7,12 @@ import { UserModel } from '../models/userModel.ts';
 import { TicketModel } from '../models/ticketModel.ts';
 import { isUserTechnical } from '../../types.ts';
 import { toPublicUser } from '../utils/publicUser.ts';
+import {
+  actorIsAdmin, isAdminAccount, isAdminLevelRole, roleExists, findUserRow,
+  countAdminAccounts, isLoginTaken, passwordPolicyError
+} from '../utils/userAdmin.ts';
+
+const forbidden = (res: Response, error: string) => res.status(403).json({ success: false, error, code: 'FORBIDDEN' });
 
 const colors = [
   'bg-blue-600', 'bg-emerald-600', 'bg-rose-600', 'bg-amber-600',
@@ -51,10 +57,26 @@ export class UserController {
         }
       }
 
-      // Check if user already exists
+      // Check if user already exists (email or user name, case-insensitive)
       const existingUser = await UserModel.getUserByEmail(userData.email);
-      if (existingUser) {
+      if (existingUser || await isLoginTaken(userData.email) || (userData.userName && await isLoginTaken(userData.userName))) {
         return res.status(400).json({ success: false, error: 'User with this email already exists.' });
+      }
+
+      const policyError = passwordPolicyError(userData.initialPassword);
+      if (policyError) {
+        return res.status(400).json({ success: false, error: policyError });
+      }
+
+      const requestedRole = userData.role || 'Employee';
+      if (!(await roleExists(requestedRole))) {
+        return res.status(400).json({ success: false, error: `Role '${requestedRole}' does not exist.` });
+      }
+
+      // Only admins may create admin-level accounts.
+      const wantsAdmin = (await isAdminLevelRole(requestedRole)) || String(userData.userType || '').toLowerCase() === 'system admin';
+      if (wantsAdmin && !(await actorIsAdmin(req))) {
+        return forbidden(res, 'Only administrators can create administrator accounts.');
       }
 
       // Determine user type: explicitly passed from form, or inferred from role
@@ -120,21 +142,41 @@ export class UserController {
   // DELETE /api/users/:uid
   static async deleteUser(req: AuthRequest, res: Response) {
     try {
-      const uid = req.params.id as string;
-      
+      const target = await findUserRow(String(req.params.id));
+      if (!target) {
+        return res.status(404).json({ success: false, error: 'User not found.' });
+      }
+      if (target.uid === req.user?.uid) {
+        return res.status(400).json({ success: false, error: 'You cannot delete your own account.' });
+      }
+      if (await isAdminAccount(target)) {
+        if (!(await actorIsAdmin(req))) {
+          return forbidden(res, 'Only administrators can delete administrator accounts.');
+        }
+        if ((await countAdminAccounts(target.uid)) === 0) {
+          return res.status(400).json({ success: false, error: 'The last administrator account cannot be deleted.' });
+        }
+      }
 
-      // Delete from database via UserModel
-      await UserModel.deleteUser(uid);
-      
-      // Invalidate all active sessions for deleted user
-      await SessionManager.invalidateAllUserSessions(uid, 'ADMIN_REVOKED');
-      logger.information('User deleted: {TargetUID} by {AdminUser}', {
-        TargetUID: uid,
+      await UserModel.deleteUser(target.uid);
+
+      // Sign the deleted user out everywhere (by their real uid, whatever id the URL used)
+      await SessionManager.invalidateAllUserSessions(target.uid, 'ADMIN_REVOKED');
+      logger.information('User deleted: {TargetUser} ({TargetUID}) by {AdminUser}', {
+        TargetUser: target.email,
+        TargetUID: target.uid,
         AdminUser: req.user?.name || req.user?.email || 'System',
         Action: 'DeleteUser'
       });
       res.status(200).json({ success: true });
     } catch (error: any) {
+      const code = error?.code || error?.cause?.code;
+      if (code === '23503') {
+        return res.status(409).json({
+          success: false,
+          error: 'This user is still referenced (for example as a department manager or role creator). Reassign those first, or lock the account instead.'
+        });
+      }
       console.error('UserController.deleteUser error:', error);
       res.status(500).json({ success: false, error: 'Failed to delete user' });
     }
@@ -143,8 +185,60 @@ export class UserController {
   // PATCH /api/users/:uid
   static async updateUser(req: AuthRequest, res: Response) {
     try {
-      const uid = req.params.id as string;
+      const target = await findUserRow(String(req.params.id));
+      if (!target) {
+        return res.status(404).json({ success: false, error: 'User not found.' });
+      }
+      const uid = target.uid;
       const updates = { ...req.body };
+
+      // Credentials and identity are never written directly from the request.
+      delete updates.passwordHash;
+      delete updates.passwordLastChangedAt;
+      delete updates.lastActiveAt;
+      if (updates.twoFactorSecret !== undefined && updates.twoFactorSecret !== null) {
+        delete updates.twoFactorSecret; // only clearing (reset) is allowed
+      }
+
+      const isAdmin = await actorIsAdmin(req);
+      const isSelf = target.uid === req.user?.uid;
+      const changesRole = updates.role !== undefined && String(updates.role) !== String(target.role || '');
+      const changesType = updates.userType !== undefined && String(updates.userType) !== String(target.userType || '');
+
+      if (!isAdmin && (await isAdminAccount(target)) && !isSelf) {
+        return forbidden(res, 'Only administrators can modify administrator accounts.');
+      }
+      if (isSelf && (changesRole || changesType)) {
+        return forbidden(res, 'You cannot change your own role or user type.');
+      }
+      if (changesRole && !(await roleExists(updates.role))) {
+        return res.status(400).json({ success: false, error: `Role '${updates.role}' does not exist.` });
+      }
+      const grantsAdmin = (changesRole && await isAdminLevelRole(updates.role)) ||
+        (changesType && String(updates.userType).toLowerCase() === 'system admin');
+      if (grantsAdmin && !isAdmin) {
+        return forbidden(res, 'Only administrators can grant administrator access.');
+      }
+      // Never demote or lock the last remaining administrator.
+      const demotes = (changesRole || changesType) && (await isAdminAccount(target)) &&
+        !(await isAdminAccount({ ...target, role: updates.role ?? target.role, userType: updates.userType ?? target.userType }));
+      if ((demotes || updates.isLockedOut === true) && (await isAdminAccount(target)) && (await countAdminAccounts(target.uid)) === 0) {
+        return res.status(400).json({ success: false, error: 'The last administrator account cannot be demoted or locked.' });
+      }
+      if (updates.email !== undefined) {
+        if (!updates.email || await isLoginTaken(updates.email, target.uid)) {
+          return res.status(400).json({ success: false, error: 'This email is already used by another account.' });
+        }
+      }
+      if (updates.userName !== undefined && updates.userName && await isLoginTaken(updates.userName, target.uid)) {
+        return res.status(400).json({ success: false, error: 'This account name is already used by another account.' });
+      }
+      if (updates.password !== undefined) {
+        const policyError = passwordPolicyError(updates.password);
+        if (policyError) {
+          return res.status(400).json({ success: false, error: policyError });
+        }
+      }
 
       if (updates.isLockedOut === false) {
         updates.lockoutEnd = null;
@@ -227,6 +321,11 @@ export class UserController {
             Action: 'PrivilegeChangeSessionInvalidation',
             Subsystem: 'SessionManagement'
           });
+        }
+
+        // POLICY: a locked account loses its active sessions immediately
+        if (updates.isLockedOut === true) {
+          await SessionManager.invalidateAllUserSessions(uid, 'ADMIN_REVOKED');
         }
 
         // POLICY: Session Invalidation on Password Change

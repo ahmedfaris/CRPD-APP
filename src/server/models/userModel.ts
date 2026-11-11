@@ -232,10 +232,9 @@ export class UserModel {
       }
 
       // Check existing row
-      let existingRows = await db.select().from(users).where(condition).limit(1);
-      if (!existingRows[0] && updates.email) {
-        existingRows = await db.select().from(users).where(eq(users.email, updates.email)).limit(1);
-      }
+      // Only the identifier from the URL selects the user. (Falling back to the email in the
+      // update body edited a different account; creating a user when none matched was worse.)
+      const existingRows = await db.select().from(users).where(condition).limit(1);
 
       if (existingRows[0]) {
         const targetId = existingRows[0].id;
@@ -246,23 +245,12 @@ export class UserModel {
         const formatted = UserModel.formatUser(updatedRow, perms);
         mockDb.updateUser(String(targetId), formatted);
         return formatted;
-      } else {
-        // If not found, create it
-        const created = await UserModel.createUser({
-          uid: idOrUid,
-          email: updates.email || `${idOrUid}@system.local`,
-          fullName: updates.fullName || 'User',
-          department: updates.department,
-          role: updates.role,
-          userType: updates.userType,
-          ...sanitized
-        });
-        return created;
       }
+      return null;
     } catch (err) {
-      console.warn('UserModel.updateUser DB error, updating mockDb:', err);
-      const updatedMock = mockDb.updateUser(idOrUid, updates as any);
-      return updatedMock || null;
+      // Report the failure instead of pretending the change was saved in mock data.
+      console.error('UserModel.updateUser DB error:', err);
+      throw err;
     }
   }
 
@@ -276,12 +264,12 @@ export class UserModel {
         ? or(eq(users.id, Number(idOrUid)), eq(users.uid, idOrUid))
         : or(eq(users.uid, idOrUid), eq(users.email, idOrUid));
 
-      await db.delete(users).where(condition);
+      const deleted = await db.delete(users).where(condition).returning();
       mockDb.deleteUser(idOrUid);
-      return true;
+      return deleted.length > 0;
     } catch (err) {
-      console.warn('UserModel.deleteUser DB error:', err);
-      return mockDb.deleteUser(idOrUid);
+      console.error('UserModel.deleteUser DB error:', err);
+      throw err;
     }
   }
 }

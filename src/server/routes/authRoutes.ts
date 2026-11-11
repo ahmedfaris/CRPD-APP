@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requireAuth, requirePermission, getEffectivePermissions, AuthRequest } from '../../middleware/auth.ts';
 import { toPublicUser } from '../utils/publicUser.ts';
+import { actorIsAdmin, isAdminAccount, findUserRow, passwordPolicyError } from '../utils/userAdmin.ts';
 import { db } from '../../db/index.ts';
 import { users, roles } from '../../db/schema.ts';
 import { eq } from 'drizzle-orm';
@@ -91,7 +92,12 @@ function checkIpRateLimit(ip: string): { allowed: boolean; retryAfterSeconds?: n
 async function canManageUser(req: AuthRequest, targetUid: unknown): Promise<boolean> {
   if (targetUid && req.user?.uid && String(targetUid) === String(req.user.uid)) return true;
   const effective = await getEffectivePermissions(req.user?.uid);
-  return !!effective && (effective.permissions.includes('*') || effective.permissions.includes('users.update'));
+  const canUpdateUsers = !!effective && (effective.permissions.includes('*') || effective.permissions.includes('users.update'));
+  if (!canUpdateUsers) return false;
+  // Administrator accounts can only be managed by administrators.
+  const target = targetUid ? await findUserRow(String(targetUid)) : null;
+  if (target && await isAdminAccount(target) && !(await actorIsAdmin(req))) return false;
+  return true;
 }
 
 // POST /api/auth/login
@@ -658,10 +664,23 @@ router.post('/reset-password-admin', requireAuth, requirePermission('users.updat
     if (!uid || !newPassword) {
       return res.status(400).json({ error: 'UID and newPassword are required.' });
     }
+    const policyError = passwordPolicyError(newPassword);
+    if (policyError) {
+      return res.status(400).json({ error: policyError });
+    }
+    const target = await findUserRow(String(uid));
+    if (!target) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+    if (await isAdminAccount(target) && target.uid !== req.user?.uid && !(await actorIsAdmin(req))) {
+      return res.status(403).json({ error: 'Only administrators can reset an administrator password.', code: 'FORBIDDEN' });
+    }
     const hash = await bcrypt.hash(newPassword, 10);
-    const [updatedUser] = await db.update(users).set({ passwordHash: hash, mustChangePassword: true }).where(eq(users.uid, uid)).returning();
-    
+    const [updatedUser] = await db.update(users).set({ passwordHash: hash, mustChangePassword: true, passwordLastChangedAt: new Date() }).where(eq(users.uid, target.uid)).returning();
+
     if (updatedUser) {
+      // The old password is no longer valid: end the user's existing sessions.
+      await SessionManager.invalidateAllUserSessions(updatedUser.uid, 'PASSWORD_CHANGE');
       logger.warning('Administrative password reset performed for user {TargetUser} by {AdminUser}', {
         TargetUser: updatedUser.email,
         AdminUser: req.user?.email || 'System',
@@ -794,11 +813,9 @@ router.post('/change-password', requireAuth, async (req: AuthRequest, res) => {
     const userUid = req.user?.uid;
     const userEmail = req.user?.email;
 
-    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 8) {
-      return res.status(400).json({
-        success: false,
-        error: 'Password must be at least 8 characters in length.'
-      });
+    const changePolicyError = passwordPolicyError(newPassword);
+    if (changePolicyError) {
+      return res.status(400).json({ success: false, error: changePolicyError });
     }
 
     const [user] = await db.select().from(users).where(eq(users.uid, userUid)).limit(1);

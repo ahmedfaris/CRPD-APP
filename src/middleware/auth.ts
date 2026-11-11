@@ -147,7 +147,7 @@ export async function getEffectivePermissions(uid: string | undefined): Promise<
 
   const role = (row.role || '').trim();
   const allRoles = await db.select().from(roles);
-  const roleRow = allRoles.find((r: any) => r.name?.trim().toLowerCase() === role.toLowerCase());
+  const roleRow = allRoles.find((r: any) => !r.isDeleted && r.name?.trim().toLowerCase() === role.toLowerCase());
   const permissions: string[] = roleRow && Array.isArray(roleRow.permissions) ? [...roleRow.permissions] : [];
 
   const roleLower = role.toLowerCase();

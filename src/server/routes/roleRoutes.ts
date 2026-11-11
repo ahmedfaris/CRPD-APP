@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { requireAuth, AuthRequest } from '../../middleware/auth.ts';
+import { requireAuth, AuthRequest, getEffectivePermissions } from '../../middleware/auth.ts';
+import { actorIsAdmin } from '../utils/userAdmin.ts';
 import { db } from '../../db/index.ts';
 import { roles, users, roleAuditLogs } from '../../db/schema.ts';
 import { eq } from 'drizzle-orm';
@@ -29,13 +30,35 @@ const requireCsrfToken = (req: any, res: any, next: any) => {
 };
 
 
-// Middleware to check if user is admin
+// Role management: administrators (Admin / Administrator / System Admin, read from the database)
+// or users with the roles.manage permission. Non-admins may not grant '*' or edit admin roles.
 const requireAdmin = async (req: AuthRequest, res: any, next: any) => {
-  if (req.user?.role !== 'Admin' && req.user?.email !== 'admin@system.local') {
-    return res.status(403).json({ error: 'Requires Admin role' });
+  try {
+    const isAdmin = await actorIsAdmin(req);
+    const eff = await getEffectivePermissions(req.user?.uid);
+    if (!isAdmin && !(eff && eff.permissions.includes('roles.manage'))) {
+      return res.status(403).json({ error: 'Requires permission to manage roles' });
+    }
+    (req as any).isRoleAdmin = isAdmin;
+    next();
+  } catch (e: any) {
+    res.status(500).json({ error: 'Permission check failed' });
   }
-  next();
 };
+
+const ADMIN_ROLE_NAMES = ['admin', 'administrator', 'system admin'];
+const isAdminRole = (role: { name?: string | null; permissions?: string[] | null }) =>
+  ADMIN_ROLE_NAMES.includes(String(role.name || '').trim().toLowerCase()) ||
+  (Array.isArray(role.permissions) && role.permissions.includes('*'));
+
+function parseRoleId(req: AuthRequest, res: any): number | null {
+  const raw = String(req.params.id ?? '');
+  if (!/^\d+$/.test(raw)) {
+    res.status(400).json({ error: 'Invalid role ID' });
+    return null;
+  }
+  return parseInt(raw, 10);
+}
 
 // GET /api/roles
 router.get('/', requireAuth, async (req: AuthRequest, res) => {
@@ -94,18 +117,41 @@ router.post('/', requireAuth, requireAdmin, requireCsrfToken, async (req: AuthRe
     }
     
     const { name, permissions } = validation.data;
-    
-    const [newRole] = await db.insert(roles).values({
-      name,
-      permissions: permissions || [],
-      createdBy: req.user!.uid
-    }).returning();
-    
+
+    if (!(req as any).isRoleAdmin && isAdminRole({ name, permissions })) {
+      return res.status(403).json({ error: 'Only administrators can create administrator roles.' });
+    }
+
+    const allRoles = await db.select().from(roles);
+    const sameName = allRoles.find(r => r.name.trim().toLowerCase() === name.trim().toLowerCase());
+    if (sameName && !sameName.isDeleted) {
+      return res.status(409).json({ error: 'A role with this name already exists.' });
+    }
+
+    let newRole;
+    if (sameName && sameName.isDeleted) {
+      // The name belonged to a deleted role (names are unique): bring that role back with the new permissions.
+      [newRole] = await db.update(roles).set({
+        name,
+        permissions: permissions || [],
+        isDeleted: false,
+        deletedAt: null,
+        deletedBy: null,
+        updatedAt: new Date()
+      }).where(eq(roles.id, sameName.id)).returning();
+    } else {
+      [newRole] = await db.insert(roles).values({
+        name,
+        permissions: permissions || [],
+        createdBy: req.user!.uid
+      }).returning();
+    }
+
     await db.insert(roleAuditLogs).values({
       roleId: newRole.id,
-      action: 'CREATE',
+      action: sameName ? 'RESTORE' : 'CREATE',
       performedBy: req.user!.uid,
-      details: 'Role created.'
+      details: sameName ? 'Deleted role restored with new permissions.' : 'Role created.'
     });
     
     logger.information('Role created: {RoleName} by {AdminUser}', {
@@ -121,8 +167,9 @@ router.post('/', requireAuth, requireAdmin, requireCsrfToken, async (req: AuthRe
 // PUT /api/roles/:id
 router.put('/:id', requireAuth, requireAdmin, requireCsrfToken, async (req: AuthRequest, res) => {
   try {
-    const id = parseInt(String(req.params.id));
-    
+    const id = parseRoleId(req, res);
+    if (id === null) return;
+
     // 1. Sanitize HTML
     const rawName = req.body.name || '';
     const sanitizedName = sanitizeHtml(rawName, { allowedTags: [], allowedAttributes: {} });
@@ -141,7 +188,32 @@ router.put('/:id', requireAuth, requireAdmin, requireCsrfToken, async (req: Auth
     if (existingRole.isDeleted) {
        return res.status(400).json({ error: 'Cannot edit a deleted role' });
     }
-    
+
+    if (!(req as any).isRoleAdmin && (isAdminRole(existingRole) || isAdminRole({ name, permissions }))) {
+      return res.status(403).json({ error: 'Only administrators can edit administrator roles or grant all permissions.' });
+    }
+    if (!(req as any).isRoleAdmin) {
+      const eff = await getEffectivePermissions(req.user?.uid);
+      if (eff && eff.role.trim().toLowerCase() === existingRole.name.trim().toLowerCase()) {
+        return res.status(403).json({ error: 'You cannot edit the role you hold.' });
+      }
+    }
+
+    const renamed = existingRole.name.trim().toLowerCase() !== name.trim().toLowerCase();
+    if (renamed) {
+      const clash = (await db.select().from(roles)).find(r => r.id !== id && r.name.trim().toLowerCase() === name.trim().toLowerCase());
+      if (clash) {
+        return res.status(409).json({ error: 'A role with this name already exists.' });
+      }
+    }
+
+    // Users are linked to roles by name: sign them out first (under the old name), then move them
+    // to the new name so they keep the role after a rename.
+    await SessionManager.invalidateSessionsByRole(existingRole.name, 'PRIVILEGE_CHANGE');
+    if (existingRole.name !== name) {
+      await db.update(users).set({ role: name }).where(eq(users.role, existingRole.name));
+    }
+
     const [updatedRole] = await db.update(roles).set({
       name,
       permissions: permissions || [],
@@ -155,8 +227,7 @@ router.put('/:id', requireAuth, requireAdmin, requireCsrfToken, async (req: Auth
       details: 'Role edited.'
     });
     
-    // POLICY: Session Invalidation on Privilege Change
-    // Invalidate active sessions for all users assigned to this role
+    // POLICY: Session Invalidation on Privilege Change (also covers users now holding the new name)
     await SessionManager.invalidateSessionsByRole(updatedRole.name, 'PRIVILEGE_CHANGE');
 
     logger.information('Role edited: {RoleName} by {AdminUser}', {
@@ -172,11 +243,15 @@ router.put('/:id', requireAuth, requireAdmin, requireCsrfToken, async (req: Auth
 // DELETE /api/roles/:id
 router.delete('/:id', requireAuth, requireAdmin, requireCsrfToken, async (req: AuthRequest, res) => {
   try {
-    const id = parseInt(String(req.params.id));
-    
+    const id = parseRoleId(req, res);
+    if (id === null) return;
+
     const [existingRole] = await db.select().from(roles).where(eq(roles.id, id));
-    if (!existingRole) return res.status(404).json({ error: 'Role not found' });
-    
+    if (!existingRole || existingRole.isDeleted) return res.status(404).json({ error: 'Role not found' });
+    if (!(req as any).isRoleAdmin && isAdminRole(existingRole)) {
+      return res.status(403).json({ error: 'Only administrators can delete administrator roles.' });
+    }
+
     // Check if users are assigned
     const assignedUsers = await db.select().from(users).where(eq(users.role, existingRole.name));
     if (assignedUsers.length > 0) {
