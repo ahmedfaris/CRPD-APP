@@ -310,8 +310,10 @@ export class UserController {
           });
         }
 
-        // POLICY: Session Invalidation on Privilege Change
-        if (updates.role !== undefined || updates.userType !== undefined) {
+        // POLICY: Session Invalidation on Privilege Change. Only when the role or user type
+        // really changed: the edit form always sends both, and invalidating on every save
+        // signed the edited user out (and the admin too when editing their own profile).
+        if (changesRole || changesType) {
           await SessionManager.invalidateAllUserSessions(updated.uid, 'PRIVILEGE_CHANGE');
           logger.warning('Security privilege changed for user {TargetUser} ({NewRole}, {NewUserType}): all active sessions invalidated', {
             TargetUser: updated.email,

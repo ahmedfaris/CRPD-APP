@@ -48,7 +48,8 @@ export function UserPolicyControlView({ onBackToHub }: UserPolicyControlViewProp
     adminUnlockUser,
     adminResetPassword,
     adminToggleForceChange,
-    adminUpdateUserRole
+    adminUpdateUserRole,
+    adminUpdateUser
   } = useAuth();
   const { t, language, dir } = useLanguage();
 
@@ -77,27 +78,14 @@ export function UserPolicyControlView({ onBackToHub }: UserPolicyControlViewProp
   const handleSavePolicy = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedUserForPolicy) return;
-    try {
-      const token = localStorage.getItem('auth_token');
-      const res = await fetch(`/api/users/${(selectedUserForPolicy as any).uid}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'X-App-Action': 'strict-client-action'
-        },
-        body: JSON.stringify(policyData)
-      });
-      if (res.ok) {
-        setSelectedUserForPolicy(null);
-        window.location.reload(); // Quick refresh to reflect the changes from the backend
-      } else {
-        const data = await res.json();
-        console.error("Failed to save policy:", data);
-        alert(data.error || "Failed to save policy");
-      }
-    } catch (err) {
-      console.error(err);
+    // Save through the auth context so the user list refreshes in place; a full page reload
+    // would drop the app back to the Metro home screen.
+    const res = await adminUpdateUser(String((selectedUserForPolicy as any).uid || selectedUserForPolicy.id), policyData);
+    if (res.success) {
+      setSelectedUserForPolicy(null);
+      showNotification(language === 'ar' ? 'تم حفظ سياسة كلمة المرور' : 'Password policy saved');
+    } else {
+      alert(res.error || (language === 'ar' ? 'فشل حفظ السياسة' : 'Failed to save policy'));
     }
   };
 
@@ -145,38 +133,31 @@ export function UserPolicyControlView({ onBackToHub }: UserPolicyControlViewProp
   const compliancePercent = totalCount > 0 ? Math.round((active2FACount / totalCount) * 100) : 0;
 
   // Handlers
-    const updateUserStatus = async (userId: string, updates: any) => {
-    try {
-      const token = localStorage.getItem('auth_token');
-      const res = await fetch(`/api/users/${userId}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(updates)
-      });
-      if (res.ok) {
-        window.location.reload();
-      } else {
-        alert("Failed to update user");
-      }
-    } catch (err) {
-      console.error(err);
-      alert("Error updating user");
+  // Apply a change and refresh the list in place (no page reload, so the view stays open).
+  const updateUserStatus = async (userId: string, updates: any, successMessage?: string) => {
+    const res = await adminUpdateUser(userId, updates);
+    if (res.success) {
+      if (successMessage) showNotification(successMessage);
+    } else {
+      alert(res.error || (language === 'ar' ? 'فشل تحديث المستخدم' : 'Failed to update user'));
     }
   };
 
   const handleToggle2FA = (userId: string, currentStatus: boolean, email: string) => {
-    updateUserStatus(userId, { twoFactorEnabled: !currentStatus });
+    updateUserStatus(userId, { twoFactorEnabled: !currentStatus },
+      language === 'ar'
+        ? `${!currentStatus ? 'تم تفعيل' : 'تم تعطيل'} المصادقة الثنائية لـ ${email}`
+        : `2FA ${!currentStatus ? 'enabled' : 'disabled'} for ${email}`);
   };
 
   const handleResetSecret = (userId: string, email: string) => {
-    updateUserStatus(userId, { twoFactorSecret: null });
+    updateUserStatus(userId, { reset2FASecret: true },
+      language === 'ar' ? `تمت إعادة ضبط مفتاح المصادقة لـ ${email}` : `2FA secret reset for ${email}`);
   };
 
   const handleUnlock = (userId: string, email: string) => {
-    updateUserStatus(userId, { isLockedOut: false, failedAccessCount: 0, lockoutEnd: null, lockoutCount: 0 });
+    updateUserStatus(userId, { isLockedOut: false },
+      language === 'ar' ? `تم فتح حساب ${email}` : `Account unlocked for ${email}`);
   };
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
