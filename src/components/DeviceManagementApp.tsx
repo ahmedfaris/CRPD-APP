@@ -12,6 +12,7 @@ import {
   DeviceReceiptAttachment
 } from '../types';
 import { 
+  Tags,
   Laptop, 
   Printer, 
   Monitor, 
@@ -65,6 +66,8 @@ import {
 } from 'lucide-react';
 import { isSameDepartment } from '../utils/departmentHelper';
 import { AssetQrScannerModal } from './AssetQrScannerModal';
+import { AssetTypesManager } from './AssetTypesManager';
+import { AssetTypeIcon, DeviceTypeIcon, assetTypeLabel, findAssetType } from './assetTypeUi';
 import { AssetQrBadgeModal } from './AssetQrBadgeModal';
 import { MaintenanceTableView } from './MaintenanceTableView';
 import { AssetStatisticsView } from './AssetStatisticsView';
@@ -95,13 +98,17 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
     getDeviceFolder,
     uploadToDeviceFolder,
     getFolderHierarchy,
-    syncFolders
+    syncFolders,
+    assetTypes
   } = useDevices();
+  // Managed asset types: who may manage devices may also manage the type list (same rule as the server).
+  const canManageTypes = canEdit || isTech;
+  const activeAssetTypes = useMemo(() => assetTypes.filter(t => t.isActive), [assetTypes]);
   const { tickets } = useTickets();
   const { getAllDepartments, resolveHierarchyForDept } = useOrg();
 
   // Main View Mode: Assets Inventory vs Asset Statistics Dashboard vs Central Maintenance Table
-  const [activeMainTab, setActiveMainTab] = useState<'assets' | 'stats' | 'maintenance'>('assets');
+  const [activeMainTab, setActiveMainTab] = useState<'assets' | 'stats' | 'maintenance' | 'types'>('assets');
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('');
@@ -156,6 +163,8 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
   const [formStatus, setFormStatus] = useState<'Operational' | 'Under Maintenance' | 'Storage' | 'Retired'>('Operational');
 
   const getDeviceCodePrefix = (deviceType: string, category: string): string => {
+    const managed = findAssetType(assetTypes, deviceType);
+    if (managed) return managed.codePrefix;
     const t = (deviceType || '').toLowerCase();
     if (t.includes('printer') || t.includes('طابعة') || t.includes('barcode')) return 'PR';
     if (t.includes('computer') || t.includes('pc') || t.includes('laptop') || t.includes('desktop') || t.includes('حاسوب') || t.includes('كمبيوتر')) return 'PC';
@@ -186,12 +195,19 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
       }
     }
     return `${prefix}-${String(maxSeq + 1).padStart(3, '0')}`;
-  }, [editingDevice, formDeviceType, formCategory, formDepartment, devices]);
+  }, [editingDevice, formDeviceType, formCategory, formDepartment, devices, assetTypes]);
 
   // Resolved organizational hierarchy (Directorate -> Department)
   const resolvedOrgHierarchy = useMemo(() => {
     return resolveHierarchyForDept(formDepartment, formDivision);
   }, [formDepartment, formDivision, resolveHierarchyForDept]);
+
+  // Keep the open details panel in step with reloaded devices (e.g. status changed by maintenance).
+  React.useEffect(() => {
+    if (!viewDeviceModal) return;
+    const fresh = devices.find(d => d.id === viewDeviceModal.id);
+    if (fresh && fresh !== viewDeviceModal) setViewDeviceModal(fresh);
+  }, [devices]);
 
   // Load device folder info when viewDeviceModal changes
   React.useEffect(() => {
@@ -233,32 +249,7 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
 
   // Helper Icon for Device Types
   const getDeviceIcon = (type: string, category: string) => {
-    const tLower = (type || '').toLowerCase();
-    if (tLower.includes('computer') || tLower.includes('pc') || tLower.includes('laptop')) {
-      return <Laptop className="w-5 h-5 text-blue-500" />;
-    }
-    if (tLower.includes('printer')) {
-      return <Printer className="w-5 h-5 text-amber-500" />;
-    }
-    if (tLower.includes('screen') || tLower.includes('monitor')) {
-      return <Monitor className="w-5 h-5 text-purple-500" />;
-    }
-    if (tLower.includes('fingerprint') || tLower.includes('biometric')) {
-      return <Fingerprint className="w-5 h-5 text-emerald-500" />;
-    }
-    if (tLower.includes('scanner') || tLower.includes('scan')) {
-      return <Scan className="w-5 h-5 text-cyan-500" />;
-    }
-    if (tLower.includes('router')) {
-      return <Server className="w-5 h-5 text-indigo-500" />;
-    }
-    if (tLower.includes('switch')) {
-      return <Network className="w-5 h-5 text-teal-500" />;
-    }
-    if (tLower.includes('access point') || tLower.includes('wifi') || tLower.includes('ap')) {
-      return <Wifi className="w-5 h-5 text-sky-500" />;
-    }
-    return category === 'network' ? <Network className="w-5 h-5 text-indigo-500" /> : <HardDrive className="w-5 h-5 text-slate-500" />;
+    return <DeviceTypeIcon types={assetTypes} deviceType={type} category={category} className="w-5 h-5" />;
   };
 
   // Scope assets: allow all users to view assets with filter by selectedDepartment
@@ -322,16 +313,51 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
     const electronicCount = scopedDevices.filter(d => d.category === 'electronic').length;
     const networkCount = scopedDevices.filter(d => d.category === 'network').length;
     const warrantyActiveCount = scopedDevices.filter(d => d.isWarrantyActive).length;
-    const maintenanceCount = scopedDevices.reduce((sum, d) => sum + (d.maintenanceHistory?.length || 0), 0);
+    // Maintenance lives in the central table; older entries may still sit on the device itself.
+    const maintenanceCount = maintenanceRecords.length + scopedDevices.reduce((sum, d) => sum + (d.maintenanceHistory?.length || 0), 0);
     return { total, electronicCount, networkCount, warrantyActiveCount, maintenanceCount };
-  }, [scopedDevices]);
+  }, [scopedDevices, maintenanceRecords]);
+
+  /**
+   * Maintenance history of one device: records from the central maintenance table plus any
+   * older entries stored on the device itself, newest first.
+   */
+  type DeviceHistoryEntry = {
+    id: string; date: string; type: string; performedBy: string; cost: number; description: string;
+    notes?: string; status?: string; diagnosis?: string; actionTaken?: string; partsCount?: number; vendor?: string;
+  };
+  const maintenanceFor = (dev: ElectronicDevice | null | undefined): DeviceHistoryEntry[] => {
+    if (!dev) return [];
+    const central: DeviceHistoryEntry[] = maintenanceRecords
+      .filter(r => String(r.assetId) === String(dev.id))
+      .map(r => ({
+        id: `m-${r.id}`,
+        date: (r.maintenanceDate || '').slice(0, 10),
+        type: r.maintenanceType,
+        performedBy: r.performedBy || '',
+        cost: Number(r.costOfMaintenance) || 0,
+        description: r.maintenanceDescription,
+        notes: r.notes || undefined,
+        status: r.status,
+        diagnosis: r.diagnosis,
+        actionTaken: r.actionTaken,
+        partsCount: r.partsUsed?.length || 0,
+        vendor: r.vendor,
+      }));
+    const legacy: DeviceHistoryEntry[] = (dev.maintenanceHistory || []).map((m, i) => ({
+      id: m.id || `legacy-${i}`, date: m.date, type: m.type, performedBy: m.performedBy, cost: Number(m.cost) || 0,
+      description: m.description, notes: m.notes, status: m.status,
+    }));
+    return [...central, ...legacy].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  };
 
   // Open Create Modal
   const handleOpenCreate = () => {
     if (!canCreate) return;
     setEditingDevice(null);
     setFormCategory('electronic');
-    setFormDeviceType('Computer');
+    setFormDeviceType((activeAssetTypes.find(t => t.key === 'Computer') || activeAssetTypes[0])?.key || 'Computer');
+    setFormCategory(((activeAssetTypes.find(t => t.key === 'Computer') || activeAssetTypes[0])?.category || 'electronic') as DeviceCategory);
     setFormBrand('');
     setFormModel('');
     setFormSerialNumber('');
@@ -635,13 +661,8 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
       return;
     }
 
-    if (viewDeviceModal && viewDeviceModal.id === maintenanceModalDevice.id) {
-      setViewDeviceModal(prev => prev ? {
-        ...prev,
-        maintenanceHistory: [...prev.maintenanceHistory, { ...newRecord, id: 'mh-' + Date.now() }]
-      } : null);
-    }
-
+    // The record is saved in the central maintenance table; the context reloads it, and the
+    // open details panel follows the reloaded device (see the effect below).
     setMaintenanceModalDevice(null);
   };
 
@@ -722,7 +743,7 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
       `"${d.location || ''}"`,
       `"${d.assignedEmployee || ''}"`,
       d.departmentHistory?.length || 0,
-      d.maintenanceHistory?.length || 0
+      maintenanceFor(d).length
     ]);
 
     const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
@@ -849,6 +870,23 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
               {metrics.maintenanceCount}
             </span>
           </button>
+
+          <button
+            type="button"
+            data-role="tab-types"
+            onClick={() => setActiveMainTab('types')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+              activeMainTab === 'types'
+                ? 'bg-cyan-700 text-white shadow-md shadow-cyan-700/30'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            <Tags className="w-4 h-4" />
+            <span>{language === 'ar' ? 'أنواع الأصول' : 'Asset Types'}</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-cyan-300 font-mono">
+              {activeAssetTypes.length}
+            </span>
+          </button>
         </div>
 
         {activeMainTab === 'stats' ? (
@@ -868,6 +906,8 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
           />
         ) : activeMainTab === 'maintenance' ? (
           <MaintenanceTableView />
+        ) : activeMainTab === 'types' ? (
+          <AssetTypesManager canManage={canManageTypes} />
         ) : (
           <>
         {/* SEARCH & FILTERS BAR */}
@@ -962,105 +1002,25 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
               <span>{language === 'ar' ? 'النوع:' : 'Type:'}</span>
             </span>
 
-            {/* Electronic Types */}
-            {selectedCategory !== 'network' && (
-              <>
+            {/* Type chips come from the managed asset types (only types that have devices or are active) */}
+            {assetTypes
+              .filter(t => (selectedCategory === 'ALL' || t.category === selectedCategory) && (t.isActive || (t.deviceCount || 0) > 0))
+              .sort((a, b) => (language === 'ar' ? a.nameAr : a.nameEn).localeCompare(language === 'ar' ? b.nameAr : b.nameEn, language))
+              .map(t => (
                 <button
-                  onClick={() => setSelectedType(selectedType === 'Computer' ? 'ALL' : 'Computer')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition cursor-pointer flex items-center space-x-1 ${
-                    selectedType === 'Computer'
-                      ? 'bg-blue-600/30 text-blue-300 border-blue-500'
+                  key={t.key}
+                  data-role="type-chip"
+                  onClick={() => setSelectedType(selectedType === t.key ? 'ALL' : t.key)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition cursor-pointer flex items-center gap-1 ${
+                    selectedType === t.key
+                      ? 'bg-cyan-600/30 text-cyan-200 border-cyan-500'
                       : 'bg-slate-900/60 text-slate-400 border-slate-700 hover:border-slate-600'
                   }`}
                 >
-                  <Laptop className="w-3 h-3 mx-1" />
-                  <span>{language === 'ar' ? 'حاسوب' : 'Computer'}</span>
+                  <AssetTypeIcon icon={t.icon} className="w-3 h-3" />
+                  <span>{language === 'ar' ? t.nameAr : t.nameEn}</span>
                 </button>
-                <button
-                  onClick={() => setSelectedType(selectedType === 'Printer' ? 'ALL' : 'Printer')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition cursor-pointer flex items-center space-x-1 ${
-                    selectedType === 'Printer'
-                      ? 'bg-amber-600/30 text-amber-300 border-amber-500'
-                      : 'bg-slate-900/60 text-slate-400 border-slate-700 hover:border-slate-600'
-                  }`}
-                >
-                  <Printer className="w-3 h-3 mx-1" />
-                  <span>{language === 'ar' ? 'طابعة' : 'Printer'}</span>
-                </button>
-                <button
-                  onClick={() => setSelectedType(selectedType === 'Screen' ? 'ALL' : 'Screen')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition cursor-pointer flex items-center space-x-1 ${
-                    selectedType === 'Screen'
-                      ? 'bg-purple-600/30 text-purple-300 border-purple-500'
-                      : 'bg-slate-900/60 text-slate-400 border-slate-700 hover:border-slate-600'
-                  }`}
-                >
-                  <Monitor className="w-3 h-3 mx-1" />
-                  <span>{language === 'ar' ? 'شاشة' : 'Screen'}</span>
-                </button>
-                <button
-                  onClick={() => setSelectedType(selectedType === 'Fingerprint device' ? 'ALL' : 'Fingerprint device')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition cursor-pointer flex items-center space-x-1 ${
-                    selectedType === 'Fingerprint device'
-                      ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500'
-                      : 'bg-slate-900/60 text-slate-400 border-slate-700 hover:border-slate-600'
-                  }`}
-                >
-                  <Fingerprint className="w-3 h-3 mx-1" />
-                  <span>{language === 'ar' ? 'جهاز بصمة' : 'Fingerprint Device'}</span>
-                </button>
-                <button
-                  onClick={() => setSelectedType(selectedType === 'Scanner' ? 'ALL' : 'Scanner')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition cursor-pointer flex items-center space-x-1 ${
-                    selectedType === 'Scanner'
-                      ? 'bg-cyan-600/30 text-cyan-300 border-cyan-500'
-                      : 'bg-slate-900/60 text-slate-400 border-slate-700 hover:border-slate-600'
-                  }`}
-                >
-                  <Scan className="w-3 h-3 mx-1" />
-                  <span>{language === 'ar' ? 'ماسح ضوئي' : 'Scanner'}</span>
-                </button>
-              </>
-            )}
-
-            {/* Network Types */}
-            {selectedCategory !== 'electronic' && (
-              <>
-                <button
-                  onClick={() => setSelectedType(selectedType === 'router' ? 'ALL' : 'router')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition cursor-pointer flex items-center space-x-1 ${
-                    selectedType === 'router'
-                      ? 'bg-indigo-600/30 text-indigo-300 border-indigo-500'
-                      : 'bg-slate-900/60 text-slate-400 border-slate-700 hover:border-slate-600'
-                  }`}
-                >
-                  <Server className="w-3 h-3 mx-1" />
-                  <span>{language === 'ar' ? 'راوتر' : 'Router'}</span>
-                </button>
-                <button
-                  onClick={() => setSelectedType(selectedType === 'switch' ? 'ALL' : 'switch')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition cursor-pointer flex items-center space-x-1 ${
-                    selectedType === 'switch'
-                      ? 'bg-teal-600/30 text-teal-300 border-teal-500'
-                      : 'bg-slate-900/60 text-slate-400 border-slate-700 hover:border-slate-600'
-                  }`}
-                >
-                  <Network className="w-3 h-3 mx-1" />
-                  <span>{language === 'ar' ? 'سويتش' : 'Switch'}</span>
-                </button>
-                <button
-                  onClick={() => setSelectedType(selectedType === 'access point' ? 'ALL' : 'access point')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition cursor-pointer flex items-center space-x-1 ${
-                    selectedType === 'access point'
-                      ? 'bg-sky-600/30 text-sky-300 border-sky-500'
-                      : 'bg-slate-900/60 text-slate-400 border-slate-700 hover:border-slate-600'
-                  }`}
-                >
-                  <Wifi className="w-3 h-3 mx-1" />
-                  <span>{language === 'ar' ? 'نقطة وصول' : 'Access Point'}</span>
-                </button>
-              </>
-            )}
+              ))}
 
             <div className="h-4 w-[1px] bg-slate-700 mx-2 hidden sm:block" />
 
@@ -1147,7 +1107,7 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
             {filteredDevices.map(device => {
-              const maintCount = device.maintenanceHistory?.length || 0;
+              const maintCount = maintenanceFor(device).length;
               const deptTransfersCount = device.departmentHistory?.length || 0;
 
               return (
@@ -1167,7 +1127,7 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
                             {device.deviceCode}
                           </span>
                           <div className="flex items-center space-x-1.5 text-[11px] text-slate-400">
-                            <span className="capitalize">{device.deviceType}</span>
+                            <span>{assetTypeLabel(assetTypes, device.deviceType, language)}</span>
                             <span>•</span>
                             <span className="text-slate-300 font-semibold">{device.brand}</span>
                           </div>
@@ -1357,7 +1317,7 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
                     </span>
                   </div>
                   <p className="text-xs text-slate-400">
-                    {viewDeviceModal.category === 'network' ? 'Network Device' : 'Electronic Device'} • {viewDeviceModal.deviceType}
+                    {viewDeviceModal.category === 'network' ? (language === 'ar' ? 'جهاز شبكة' : 'Network Device') : (language === 'ar' ? 'جهاز إلكتروني' : 'Electronic Device')} • {assetTypeLabel(assetTypes, viewDeviceModal.deviceType, language)}
                   </p>
                 </div>
               </div>
@@ -1407,7 +1367,7 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
                 <Activity className="w-3.5 h-3.5 mx-1 text-cyan-400" />
                 <span>{language === 'ar' ? 'الخط الزمني للأصل' : 'Asset Timeline'}</span>
                 <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-cyan-500/20 text-cyan-300 font-mono">
-                  {(viewDeviceModal.departmentHistory?.length || 0) + (viewDeviceModal.maintenanceHistory?.length || 0) + 1}
+                  {(viewDeviceModal.departmentHistory?.length || 0) + maintenanceFor(viewDeviceModal).length + 1}
                 </span>
               </button>
 
@@ -1437,7 +1397,7 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
                 <Wrench className="w-3.5 h-3.5 mx-1" />
                 <span>{language === 'ar' ? 'سجل الصيانة والدعم' : 'Maintenance History'}</span>
                 <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-300">
-                  {viewDeviceModal.maintenanceHistory?.length || 0}
+                  {maintenanceFor(viewDeviceModal).length}
                 </span>
               </button>
 
@@ -1772,7 +1732,7 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
                             {language === 'ar' ? 'الخط الزمني الموحد للأصل' : 'Lifecycle Event Timeline'}
                           </span>
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                            {(viewDeviceModal.departmentHistory?.length || 0) + (viewDeviceModal.maintenanceHistory?.length || 0) + 1} {language === 'ar' ? 'محطات' : 'events'}
+                            {(viewDeviceModal.departmentHistory?.length || 0) + maintenanceFor(viewDeviceModal).length + 1} {language === 'ar' ? 'محطات' : 'events'}
                           </span>
                         </div>
                         <p className="text-[11px] text-slate-400 mt-0.5">
@@ -1988,34 +1948,39 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
                     </button>
                   </div>
 
-                  {(!viewDeviceModal.maintenanceHistory || viewDeviceModal.maintenanceHistory.length === 0) ? (
+                  {maintenanceFor(viewDeviceModal).length === 0 ? (
                     <div className="text-center py-8 text-slate-500 bg-slate-800/30 rounded-xl border border-slate-800">
                       <Wrench className="w-8 h-8 mx-auto mb-2 text-slate-600" />
                       <p>{language === 'ar' ? 'لا توجد سجلات صيانة مسجلة لهذا الجهاز حتى الآن.' : 'No maintenance records registered for this device yet.'}</p>
                     </div>
                   ) : (
-                    <div className="space-y-3">
-                      {viewDeviceModal.maintenanceHistory.map((maint, idx) => (
-                        <div key={maint.id || idx} className="bg-slate-800/80 p-4 rounded-xl border border-slate-700/80 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center space-x-2">
-                              <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
-                                maint.type === 'Repair' 
-                                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                                  : maint.type === 'Upgrade'
-                                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
-                                  : maint.type === 'Inspection'
-                                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
-                                  : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                              }`}>
+                    <div className="space-y-3" data-role="device-maintenance-history">
+                      <div className="flex items-center justify-between text-[11px] text-slate-400 bg-slate-800/40 rounded-lg px-3 py-2 border border-slate-800">
+                        <span>{language === 'ar' ? `${maintenanceFor(viewDeviceModal).length} سجل` : `${maintenanceFor(viewDeviceModal).length} records`}</span>
+                        <span className="font-mono text-emerald-300">
+                          {language === 'ar' ? 'إجمالي الكلفة: ' : 'Total cost: '}
+                          {maintenanceFor(viewDeviceModal).reduce((sum, m) => sum + m.cost, 0).toLocaleString('en-US')} {language === 'ar' ? 'د.ع' : 'IQD'}
+                        </span>
+                      </div>
+                      {maintenanceFor(viewDeviceModal).map((maint) => (
+                        <div key={maint.id} className="bg-slate-800/80 p-4 rounded-xl border border-slate-700/80 space-y-2">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="px-2.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                                 {maint.type}
                               </span>
-                              <span className="font-bold text-white text-xs">{maint.performedBy}</span>
+                              {maint.status && (
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                  maint.status === 'Completed' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                  : maint.status === 'Cancelled' ? 'bg-slate-700 text-slate-300 border-slate-600'
+                                  : 'bg-sky-500/15 text-sky-300 border-sky-500/30'
+                                }`}>{maint.status}</span>
+                              )}
+                              {maint.performedBy && <span className="font-bold text-white text-xs">{maint.performedBy}</span>}
                             </div>
-
-                            <div className="flex items-center space-x-2 font-mono text-[11px] text-slate-400">
+                            <div className="flex items-center gap-2 font-mono text-[11px] text-slate-400">
                               <span>{maint.date}</span>
-                              {maint.cost !== undefined && maint.cost > 0 && (
+                              {maint.cost > 0 && (
                                 <span className="text-emerald-400 font-bold">
                                   {maint.cost.toLocaleString('en-US')} {language === 'ar' ? 'د.ع' : 'IQD'}
                                 </span>
@@ -2023,14 +1988,22 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
                             </div>
                           </div>
 
-                          <p className="text-slate-200 text-xs leading-relaxed">
-                            {maint.description}
-                          </p>
-
-                          {maint.notes && (
-                            <p className="text-slate-400 text-[11px] italic bg-slate-900/60 p-2 rounded-lg">
-                              {maint.notes}
+                          <p className="text-slate-200 text-xs leading-relaxed">{maint.description}</p>
+                          {maint.diagnosis && (
+                            <p className="text-[11px] text-slate-300"><span className="text-slate-500">{language === 'ar' ? 'التشخيص: ' : 'Diagnosis: '}</span>{maint.diagnosis}</p>
+                          )}
+                          {maint.actionTaken && (
+                            <p className="text-[11px] text-slate-300"><span className="text-slate-500">{language === 'ar' ? 'الإجراء: ' : 'Action: '}</span>{maint.actionTaken}</p>
+                          )}
+                          {(maint.partsCount || maint.vendor) ? (
+                            <p className="text-[11px] text-slate-400">
+                              {maint.partsCount ? (language === 'ar' ? `${maint.partsCount} قطعة غيار` : `${maint.partsCount} part(s)`) : ''}
+                              {maint.partsCount && maint.vendor ? ' • ' : ''}
+                              {maint.vendor ? (language === 'ar' ? `الجهة المنفذة: ${maint.vendor}` : `Vendor: ${maint.vendor}`) : ''}
                             </p>
+                          ) : null}
+                          {maint.notes && (
+                            <p className="text-slate-400 text-[11px] italic bg-slate-900/60 p-2 rounded-lg">{maint.notes}</p>
                           )}
                         </div>
                       ))}
@@ -2104,31 +2077,39 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
                   {language === 'ar' ? 'نوع الأصل / تصنيف الجهاز *' : 'Asset / Device Type *'}
                 </label>
                 <select
-                  value={`${formCategory}:${formDeviceType}`}
+                  value={formDeviceType}
+                  data-field="deviceType"
                   onChange={(e) => {
-                    const [cat, dt] = e.target.value.split(':');
-                    setFormCategory(cat as DeviceCategory);
-                    setFormDeviceType(dt as DeviceType);
+                    const t = findAssetType(assetTypes, e.target.value);
+                    setFormDeviceType(e.target.value as DeviceType);
+                    if (t) setFormCategory(t.category as DeviceCategory);
                   }}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3.5 text-white text-sm sm:text-base focus:outline-hidden focus:border-cyan-500 font-medium cursor-pointer shadow-xs"
                 >
-                  <optgroup label={language === 'ar' ? '— الأجهزة الإلكترونية والمكتبية —' : '— Electronic & Office Devices —'}>
-                    <option value="electronic:Computer">{language === 'ar' ? 'حاسوب شخصي / مكتبي / محمول (Computer / Laptop)' : 'Computer / PC / Laptop'}</option>
-                    <option value="electronic:Printer">{language === 'ar' ? 'طابعة مستندات أو باركود (Printer)' : 'Printer / Barcode'}</option>
-                    <option value="electronic:Screen">{language === 'ar' ? 'شاشة عرض / مونيتور (Screen / Monitor)' : 'Screen / Monitor'}</option>
-                    <option value="electronic:Fingerprint device">{language === 'ar' ? 'جهاز بصمة حضور وانصراف (Fingerprint Device)' : 'Fingerprint Device'}</option>
-                    <option value="electronic:Scanner">{language === 'ar' ? 'ماسح ضوئي / قارئ باركود (Scanner)' : 'Scanner / Barcode Reader'}</option>
-                  </optgroup>
-                  <optgroup label={language === 'ar' ? '— عتاد وتجهيزات الشبكات —' : '— Network Hardware —'}>
-                    <option value="network:router">{language === 'ar' ? 'راوتر شبكة (Router)' : 'Router (Network)'}</option>
-                    <option value="network:switch">{language === 'ar' ? 'سويتش / موزع شبكة (Switch)' : 'Switch (Network)'}</option>
-                    <option value="network:access point">{language === 'ar' ? 'نقطة وصول لاسلكية (Access Point)' : 'Access Point (Wireless)'}</option>
-                  </optgroup>
+                  {(['electronic', 'network'] as const).map(cat => {
+                    // Active types, plus the device's current type when editing (even if it was deactivated)
+                    const options = assetTypes.filter(t => t.category === cat && (t.isActive || t.key === formDeviceType));
+                    if (options.length === 0) return null;
+                    return (
+                      <optgroup key={cat} label={cat === 'electronic'
+                        ? (language === 'ar' ? '— الأجهزة الإلكترونية والمكتبية —' : '— Electronic & Office Devices —')
+                        : (language === 'ar' ? '— عتاد وتجهيزات الشبكات —' : '— Network Hardware —')}>
+                        {options.map(t => (
+                          <option key={t.key} value={t.key}>
+                            {language === 'ar' ? `${t.nameAr} (${t.nameEn})` : t.nameEn} — {t.codePrefix}
+                          </option>
+                        ))}
+                      </optgroup>
+                    );
+                  })}
+                  {!findAssetType(assetTypes, formDeviceType) && formDeviceType && (
+                    <option value={formDeviceType}>{formDeviceType}</option>
+                  )}
                 </select>
                 <p className="text-xs text-slate-400 mt-1.5">
                   {language === 'ar' 
-                    ? 'اختر نوع الجهاز المحدد بدقة لتحديد الفئة المناسبة وتنسيق الصيانة والعهد'
-                    : 'Select the specific device type to accurately categorize the asset'}
+                    ? 'القائمة من «أنواع الأصول»؛ يمكن إضافة أنواع جديدة من تبويب أنواع الأصول.'
+                    : 'Types come from the Asset Types tab, where new types can be added.'}
                 </p>
               </div>
 

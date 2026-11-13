@@ -361,6 +361,48 @@ export async function initTicketTables(): Promise<void> {
           END IF;
         END $$;
         CREATE INDEX IF NOT EXISTS idx_maintenance_ticket_id ON maintenance(ticket_id);
+
+        -- Detailed maintenance record columns
+        ALTER TABLE maintenance ADD COLUMN IF NOT EXISTS diagnosis TEXT;
+        ALTER TABLE maintenance ADD COLUMN IF NOT EXISTS action_taken TEXT;
+        ALTER TABLE maintenance ADD COLUMN IF NOT EXISTS vendor TEXT;
+        ALTER TABLE maintenance ADD COLUMN IF NOT EXISTS parts_used JSONB DEFAULT '[]'::jsonb;
+        ALTER TABLE maintenance ADD COLUMN IF NOT EXISTS labor_cost NUMERIC(12, 2) DEFAULT 0.00;
+        ALTER TABLE maintenance ADD COLUMN IF NOT EXISTS parts_cost NUMERIC(12, 2) DEFAULT 0.00;
+        ALTER TABLE maintenance ADD COLUMN IF NOT EXISTS under_warranty BOOLEAN DEFAULT FALSE;
+        ALTER TABLE maintenance ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP;
+        ALTER TABLE maintenance ADD COLUMN IF NOT EXISTS next_maintenance_date TEXT;
+        CREATE INDEX IF NOT EXISTS idx_maintenance_status ON maintenance(status);
+
+        -- Asset types (managed from the Asset Management app)
+        CREATE TABLE IF NOT EXISTS asset_types (
+          id SERIAL PRIMARY KEY,
+          key TEXT NOT NULL UNIQUE,
+          name_en TEXT NOT NULL,
+          name_ar TEXT NOT NULL,
+          category TEXT NOT NULL DEFAULT 'electronic',
+          code_prefix TEXT NOT NULL UNIQUE,
+          icon TEXT NOT NULL DEFAULT 'device',
+          description TEXT,
+          is_active BOOLEAN NOT NULL DEFAULT TRUE,
+          is_built_in BOOLEAN NOT NULL DEFAULT FALSE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        -- Built-in types: the keys match the device_type values devices already use, and the
+        -- prefixes match the codes already issued (PC-001, PR-001, ...). Existing rows are kept.
+        INSERT INTO asset_types (key, name_en, name_ar, category, code_prefix, icon, is_built_in) VALUES
+          ('Computer', 'Computer / Laptop', 'حاسوب مكتبي / محمول', 'electronic', 'PC', 'computer', TRUE),
+          ('Printer', 'Printer', 'طابعة', 'electronic', 'PR', 'printer', TRUE),
+          ('Screen', 'Screen / Monitor', 'شاشة عرض', 'electronic', 'MN', 'monitor', TRUE),
+          ('Scanner', 'Scanner', 'ماسح ضوئي', 'electronic', 'SC', 'scanner', TRUE),
+          ('Fingerprint device', 'Fingerprint Device', 'جهاز بصمة', 'electronic', 'FP', 'fingerprint', TRUE),
+          ('Server', 'Server', 'خادم (سيرفر)', 'network', 'SR', 'server', TRUE),
+          ('Phone', 'IP Phone', 'هاتف شبكي', 'electronic', 'PH', 'phone', TRUE),
+          ('router', 'Router', 'راوتر', 'network', 'RT', 'router', TRUE),
+          ('switch', 'Switch', 'سويتش', 'network', 'SW', 'switch', TRUE),
+          ('access point', 'Access Point', 'نقطة وصول لاسلكية', 'network', 'AP', 'wifi', TRUE)
+        ON CONFLICT DO NOTHING;
         CREATE INDEX IF NOT EXISTS idx_maintenance_requester_id ON maintenance(requester_id);
 
         -- User Notifications Table

@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { db } from '../../db/index.ts';
 import { departments, electronicDevices } from '../../db/schema.ts';
+import { findAssetType } from '../utils/assetTypes.ts';
 import { eq } from 'drizzle-orm';
 import { DeviceFolderHierarchy, DeviceReceiptAttachment } from '../../types.ts';
 
@@ -115,7 +116,10 @@ export async function generateNextDeviceCode(
   // Device codes must be unique across the organization (device_code is UNIQUE in the
   // database), so the sequence runs per type prefix over ALL devices, not per department.
   // Numbering per department produced duplicates such as PC-001 in IT and in Finance.
-  const prefix = getDeviceCodePrefix(deviceType, category);
+  // The prefix comes from the managed asset type (e.g. PC, PR, UPS); unknown types fall back
+  // to the built-in keyword mapping.
+  const type = await findAssetType(deviceType);
+  const prefix = type?.codePrefix || getDeviceCodePrefix(deviceType, category);
   const allDevices = await db.select({ deviceCode: electronicDevices.deviceCode }).from(electronicDevices);
 
   let maxSeq = 0;

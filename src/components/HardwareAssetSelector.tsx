@@ -114,7 +114,7 @@ export function HardwareAssetSelector({
   onChangePhysicalLocation,
   strictUserDepartmentOnly = false,
 }: HardwareAssetSelectorProps) {
-  const { devices, addDevice, loading: devicesLoading } = useDevices();
+  const { devices, addDevice, loading: devicesLoading, assetTypes } = useDevices();
   const { getAllDepartments, resolveHierarchyForDept } = useOrg();
   const { language } = useLanguage();
   const { currentUser, isTechnicalUser, isAdmin } = useAuth();
@@ -844,26 +844,28 @@ export function HardwareAssetSelector({
                   {language === 'ar' ? 'نوع الأصل / تصنيف الجهاز *' : 'Asset / Device Type *'}
                 </label>
                 <select
-                  value={`${quickCategory}:${quickDeviceType}`}
+                  value={quickDeviceType}
                   onChange={(e) => {
-                    const [cat, dt] = e.target.value.split(':');
-                    setQuickCategory(cat as 'electronic' | 'network');
-                    setQuickDeviceType(dt);
+                    const t = assetTypes.find(x => x.key === e.target.value);
+                    setQuickDeviceType(e.target.value);
+                    if (t) setQuickCategory(t.category === 'network' ? 'network' : 'electronic');
                   }}
                   className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm sm:text-base text-slate-900 bg-white focus:ring-2 focus:ring-amber-500 font-medium cursor-pointer shadow-xs"
                 >
-                  <optgroup label={language === 'ar' ? '— الأجهزة الإلكترونية والمكتبية —' : '— Electronic & Office Devices —'}>
-                    <option value="electronic:Computer">{language === 'ar' ? 'حاسوب شخصي / مكتبي / محمول (Computer / Laptop)' : 'Computer / PC / Laptop'}</option>
-                    <option value="electronic:Printer">{language === 'ar' ? 'طابعة مستندات أو باركود (Printer)' : 'Printer / Barcode'}</option>
-                    <option value="electronic:Screen">{language === 'ar' ? 'شاشة عرض / مونيتور (Screen / Monitor)' : 'Screen / Monitor'}</option>
-                    <option value="electronic:Fingerprint device">{language === 'ar' ? 'جهاز بصمة حضور وانصراف (Fingerprint Device)' : 'Fingerprint Device'}</option>
-                    <option value="electronic:Scanner">{language === 'ar' ? 'ماسح ضوئي / قارئ باركود (Scanner)' : 'Scanner / Barcode Reader'}</option>
-                  </optgroup>
-                  <optgroup label={language === 'ar' ? '— عتاد وتجهيزات الشبكات —' : '— Network Hardware —'}>
-                    <option value="network:router">{language === 'ar' ? 'راوتر شبكة (Router)' : 'Router (Network)'}</option>
-                    <option value="network:switch">{language === 'ar' ? 'سويتش / موزع شبكة (Switch)' : 'Switch (Network)'}</option>
-                    <option value="network:access point">{language === 'ar' ? 'نقطة وصول لاسلكية (Access Point)' : 'Access Point (Wireless)'}</option>
-                  </optgroup>
+                  {/* Types come from the managed asset types list */}
+                  {(['electronic', 'network'] as const).map(cat => {
+                    const options = assetTypes.filter(t => t.category === cat && t.isActive);
+                    if (options.length === 0) return null;
+                    return (
+                      <optgroup key={cat} label={cat === 'electronic'
+                        ? (language === 'ar' ? '— الأجهزة الإلكترونية والمكتبية —' : '— Electronic & Office Devices —')
+                        : (language === 'ar' ? '— عتاد وتجهيزات الشبكات —' : '— Network Hardware —')}>
+                        {options.map(t => (
+                          <option key={t.key} value={t.key}>{language === 'ar' ? `${t.nameAr} (${t.nameEn})` : t.nameEn}</option>
+                        ))}
+                      </optgroup>
+                    );
+                  })}
                 </select>
               </div>
 

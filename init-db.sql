@@ -257,6 +257,31 @@ CREATE TABLE IF NOT EXISTS maintenance (
   status TEXT NOT NULL DEFAULT 'Completed',
   performed_by TEXT DEFAULT 'Technical Support Team',
   notes TEXT,
+  diagnosis TEXT,
+  action_taken TEXT,
+  vendor TEXT,
+  parts_used JSONB DEFAULT '[]'::jsonb,
+  labor_cost NUMERIC(12, 2) DEFAULT 0.00,
+  parts_cost NUMERIC(12, 2) DEFAULT 0.00,
+  under_warranty BOOLEAN DEFAULT FALSE,
+  completed_at TIMESTAMP,
+  next_maintenance_date TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Asset types managed from the Asset Management app (built-in types are added by the server on start).
+CREATE TABLE IF NOT EXISTS asset_types (
+  id SERIAL PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  name_en TEXT NOT NULL,
+  name_ar TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'electronic',
+  code_prefix TEXT NOT NULL UNIQUE,
+  icon TEXT NOT NULL DEFAULT 'device',
+  description TEXT,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  is_built_in BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

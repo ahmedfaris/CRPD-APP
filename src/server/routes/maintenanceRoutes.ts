@@ -1,7 +1,7 @@
 // src/server/routes/maintenanceRoutes.ts
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.ts';
-import { requireDeviceManager } from '../utils/deviceAccess.ts';
+import { requireDeviceManager, requireDeviceDeleter } from '../utils/deviceAccess.ts';
 import { MaintenanceController } from '../controllers/maintenanceController.ts';
 
 const router = Router();
@@ -13,6 +13,7 @@ router.get('/', MaintenanceController.getMaintenanceList);
 router.get('/:id', MaintenanceController.getMaintenanceById);
 router.post('/', requireDeviceManager, MaintenanceController.createMaintenance);
 router.put('/:id', requireDeviceManager, MaintenanceController.updateMaintenance);
-router.delete('/:id', requireDeviceManager, MaintenanceController.deleteMaintenance);
+// Deleting a record needs the same right as deleting assets (matches the delete button in the UI).
+router.delete('/:id', requireDeviceDeleter, MaintenanceController.deleteMaintenance);
 
 export default router;

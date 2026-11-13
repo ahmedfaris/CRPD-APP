@@ -1,8 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { requireAuth, AuthRequest } from '../../middleware/auth.ts';
 import { getDeviceAccess, forbid, requireDeviceManager, requireDeviceDeleter } from '../utils/deviceAccess.ts';
+import { findAssetType } from '../utils/assetTypes.ts';
+import { insertMaintenanceRecord, MAINTENANCE_TYPES, MAINTENANCE_STATUSES } from '../controllers/maintenanceController.ts';
 import { db } from '../../db/index.ts';
-import { electronicDevices } from '../../db/schema.ts';
+import { electronicDevices, assetTypes } from '../../db/schema.ts';
 import { eq, desc, ilike, or } from 'drizzle-orm';
 import { logger } from '../utils/logger.ts';
 import path from 'path';
@@ -12,6 +14,7 @@ import {
   listDeviceFolderFiles,
   syncAllExistingDevicesToDisk,
   generateNextDeviceCode,
+  getDeviceCodePrefix,
   ASSET_ARCHIVE_STORAGE_DIR,
   ASSET_ARCHIVE_STORAGE_DIR_NAME,
   ORGANIZATION_STORAGE_DIR,
@@ -227,13 +230,34 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res) => {
   }
 });
 
+/**
+ * Resolve the asset type for a device. Exact key/name first; free-text names from older
+ * clients (e.g. "Desktop Computer", "Laser Printer") map through the old keyword rules to the
+ * managed type with the same code prefix. Returns null when nothing matches.
+ */
+async function resolveDeviceType(value: unknown) {
+  const exact = await findAssetType(value);
+  if (exact) return exact;
+  const prefix = getDeviceCodePrefix(String(value ?? ''));
+  if (prefix === 'DEV' || prefix === 'NW') return null;
+  const all = await db.select().from(assetTypes);
+  return all.find(t => t.codePrefix.toUpperCase() === prefix) || null;
+}
+
 // POST /api/devices - Register new device
 router.post('/', requireAuth, async (req: AuthRequest, res) => {
   try {
-    const body = req.body;
-    if (!body.category || !body.deviceType || !body.brand || !body.model || !body.department) {
-      return res.status(400).json({ error: 'Required fields missing: category, deviceType, brand, model, department' });
+    const body = { ...req.body };
+    if (!body.deviceType || !body.brand || !body.model || !body.department) {
+      return res.status(400).json({ error: 'Required fields missing: deviceType, brand, model, department' });
     }
+    // The type must be one of the active managed asset types; store its key and category.
+    const assetType = await resolveDeviceType(body.deviceType);
+    if (!assetType || !assetType.isActive) {
+      return res.status(400).json({ error: `Unknown or inactive asset type: ${body.deviceType}`, code: 'INVALID_ASSET_TYPE' });
+    }
+    body.deviceType = assetType.key;
+    body.category = assetType.category;
 
     // Ordinary users may only register devices for their own department.
     const access = await getDeviceAccess(req);
@@ -361,11 +385,21 @@ router.put('/:id', requireAuth, requireDeviceManager, async (req: AuthRequest, r
   try {
     const id = parseDeviceId(req, res);
     if (id === null) return;
-    const body = req.body;
+    const body = { ...req.body };
 
     const [existing] = await db.select().from(electronicDevices).where(eq(electronicDevices.id, id));
     if (!existing) {
       return res.status(404).json({ error: 'Device not found' });
+    }
+
+    // Changing the type: it must be an active managed type (keeping the current one is always allowed).
+    if (body.deviceType !== undefined && String(body.deviceType).toLowerCase() !== String(existing.deviceType).toLowerCase()) {
+      const assetType = await resolveDeviceType(body.deviceType);
+      if (!assetType || !assetType.isActive) {
+        return res.status(400).json({ error: `Unknown or inactive asset type: ${body.deviceType}`, code: 'INVALID_ASSET_TYPE' });
+      }
+      body.deviceType = assetType.key;
+      body.category = assetType.category;
     }
 
     const [updated] = await db.update(electronicDevices).set({
@@ -616,7 +650,12 @@ router.post('/:id/folder/upload', requireAuth, requireDeviceManager, async (req:
   }
 });
 
-// POST /api/devices/:id/maintenance - Add a maintenance record
+// POST /api/devices/:id/maintenance - Add a maintenance record from the device screen.
+// Saved in the central maintenance table (the same history the Maintenance tab shows).
+const LEGACY_MAINT_TYPES: Record<string, string> = {
+  Routine: 'Routine Maintenance', Repair: 'Hardware Repair', Upgrade: 'Upgrade',
+  Inspection: 'Inspection', Replacement: 'Component Replacement',
+};
 router.post('/:id/maintenance', requireAuth, requireDeviceManager, async (req: AuthRequest, res) => {
   try {
     const id = parseDeviceId(req, res);
@@ -626,48 +665,45 @@ router.post('/:id/maintenance', requireAuth, requireDeviceManager, async (req: A
     if (!description || !type) {
       return res.status(400).json({ error: 'Maintenance type and description are required' });
     }
+    const maintenanceType = LEGACY_MAINT_TYPES[type] || (MAINTENANCE_TYPES.includes(type) ? type : null);
+    if (!maintenanceType) {
+      return res.status(400).json({ error: `Unknown maintenance type: ${type}` });
+    }
+    const st = status || 'Completed';
+    if (!MAINTENANCE_STATUSES.includes(st)) {
+      return res.status(400).json({ error: `Unknown maintenance status: ${st}` });
+    }
+    const amount = cost === undefined || cost === null || cost === '' ? 0 : Number(cost);
+    if (!Number.isFinite(amount) || amount < 0) {
+      return res.status(400).json({ error: 'Cost must be a number of 0 or more' });
+    }
+    const when = date ? new Date(date) : new Date();
+    if (isNaN(when.getTime())) {
+      return res.status(400).json({ error: 'Invalid maintenance date' });
+    }
 
     const [device] = await db.select().from(electronicDevices).where(eq(electronicDevices.id, id));
     if (!device) {
       return res.status(404).json({ error: 'Device not found' });
     }
 
-    const currentHistory = Array.isArray(device.maintenanceHistory) 
-      ? device.maintenanceHistory 
-      : (typeof device.maintenanceHistory === 'string' ? JSON.parse(device.maintenanceHistory) : []);
+    const actor = { uid: req.user?.uid || '', fullName: req.user?.fullName || req.user?.email || 'System User' };
+    const record = await insertMaintenanceRecord(id, {
+      maintenanceType,
+      maintenanceDate: when,
+      maintenanceDescription: String(description).slice(0, 2000),
+      performedBy: performedBy ? String(performedBy).slice(0, 120) : actor.fullName,
+      costOfMaintenance: amount,
+      status: st,
+      notes: notes ? String(notes).slice(0, 2000) : null,
+    }, actor, null);
 
-    const maintenanceEntry = {
-      id: 'mh-' + Date.now(),
-      date: date || new Date().toISOString().split('T')[0],
-      type: type || 'Routine',
-      description,
-      performedBy: performedBy || req.user?.fullName || 'Internal IT Technician',
-      cost: cost ? parseFloat(cost) : 0,
-      status: status || 'Completed',
-      notes: notes || ''
-    };
-
-    const updatedHistory = [...currentHistory, maintenanceEntry];
-
-    // If maintenance status is 'In Progress', optionally mark device status
-    const newDeviceStatus = status === 'In Progress' ? 'Under Maintenance' : device.status === 'Under Maintenance' ? 'Operational' : device.status;
-
-    const [updated] = await db.update(electronicDevices).set({
-      maintenanceHistory: updatedHistory,
-      status: newDeviceStatus,
-      updatedAt: new Date()
-    }).where(eq(electronicDevices.id, id)).returning();
-
-    logger.info('Maintenance record added to device', {
-      deviceId: id,
-      type,
-      user: req.user?.email
-    });
-
-    res.json({ success: true, data: updated, maintenanceEntry });
+    const [updated] = await db.select().from(electronicDevices).where(eq(electronicDevices.id, id));
+    logger.info('Maintenance record added to device', { deviceId: id, type: maintenanceType, user: req.user?.email });
+    res.json({ success: true, data: updated, maintenanceEntry: record });
   } catch (error: any) {
     logger.error('Error logging maintenance record', { error: error.message });
-    res.status(500).json({ error: 'Failed to log maintenance record', details: error.message });
+    res.status(500).json({ error: 'Failed to log maintenance record' });
   }
 });
 

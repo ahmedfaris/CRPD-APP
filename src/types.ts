@@ -124,11 +124,46 @@ export interface MaintenanceRecord {
   requesterId?: string;
   ticketId?: number;
   ticketNo?: string;
-  status?: 'Scheduled' | 'In Progress' | 'Completed' | string;
+  status?: 'Scheduled' | 'In Progress' | 'Pending Parts' | 'Completed' | 'Cancelled' | string;
   performedBy?: string;
   notes?: string;
   createdAt?: string;
   updatedAt?: string;
+  // Detailed record
+  deviceType?: string;
+  deviceStatus?: string;
+  serialNumber?: string;
+  department?: string;
+  diagnosis?: string;
+  actionTaken?: string;
+  vendor?: string;
+  partsUsed?: MaintenancePart[];
+  laborCost?: number;
+  partsCost?: number;
+  underWarranty?: boolean;
+  completedAt?: string | null;
+  nextMaintenanceDate?: string;
+}
+
+export interface MaintenancePart {
+  name: string;
+  quantity: number;
+  unitCost: number;
+}
+
+/** Asset type managed in the Asset Management app; devices store `key` as their deviceType. */
+export interface AssetType {
+  id: number;
+  key: string;
+  nameEn: string;
+  nameAr: string;
+  category: 'electronic' | 'network' | string;
+  codePrefix: string;
+  icon: string;
+  description?: string | null;
+  isActive: boolean;
+  isBuiltIn: boolean;
+  deviceCount?: number;
 }
 
 export interface DeviceReceiptAttachment {

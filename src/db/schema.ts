@@ -278,6 +278,36 @@ export const maintenance = pgTable('maintenance', {
   status: text('status').notNull().default('Completed'), // 'Scheduled' | 'In Progress' | 'Completed' | 'Pending Parts'
   performedBy: text('performed_by').default('Technical Support Team'),
   notes: text('notes'),
+  // Detailed maintenance record
+  diagnosis: text('diagnosis'),                 // what was found
+  actionTaken: text('action_taken'),            // what was done to fix it
+  vendor: text('vendor'),                       // external service provider, if any
+  partsUsed: jsonb('parts_used').default([]),   // [{ name, quantity, unitCost }]
+  laborCost: numeric('labor_cost', { precision: 12, scale: 2 }).default('0.00'),
+  partsCost: numeric('parts_cost', { precision: 12, scale: 2 }).default('0.00'),
+  underWarranty: boolean('under_warranty').default(false),
+  completedAt: timestamp('completed_at'),
+  nextMaintenanceDate: text('next_maintenance_date'), // YYYY-MM-DD, for preventive maintenance
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+/**
+ * Asset types managed by the organization (Computer, Printer, Scanner, ...).
+ * Devices store the type's `key` in electronic_devices.device_type; the key never changes,
+ * names and the code prefix can be edited.
+ */
+export const assetTypes = pgTable('asset_types', {
+  id: serial('id').primaryKey(),
+  key: text('key').notNull().unique(),
+  nameEn: text('name_en').notNull(),
+  nameAr: text('name_ar').notNull(),
+  category: text('category').notNull().default('electronic'), // 'electronic' | 'network'
+  codePrefix: text('code_prefix').notNull().unique(),          // e.g. PC -> PC-001
+  icon: text('icon').notNull().default('device'),
+  description: text('description'),
+  isActive: boolean('is_active').notNull().default(true),
+  isBuiltIn: boolean('is_built_in').notNull().default(false),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });

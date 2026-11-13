@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
-import { ElectronicDevice, DeviceMaintenanceItem, DeviceDepartmentHistoryItem, MaintenanceRecord } from '../types';
+import { ElectronicDevice, DeviceMaintenanceItem, DeviceDepartmentHistoryItem, MaintenanceRecord, AssetType } from '../types';
 import { useAuth } from './AuthContext';
 
 interface DeviceFilters {
@@ -22,6 +22,11 @@ interface DeviceContextType {
   addMaintenanceRecord: (id: string | number, record: Omit<DeviceMaintenanceItem, 'id'>) => Promise<{ success: boolean; error?: string }>;
   createMaintenanceTableRecord: (data: Partial<MaintenanceRecord>) => Promise<{ success: boolean; data?: any; error?: string }>;
   deleteMaintenanceTableRecord: (id: number) => Promise<{ success: boolean; error?: string }>;
+  updateMaintenanceTableRecord: (id: number, data: Partial<MaintenanceRecord>) => Promise<{ success: boolean; data?: any; error?: string }>;
+  assetTypes: AssetType[];
+  fetchAssetTypes: () => Promise<void>;
+  saveAssetType: (data: Partial<AssetType>, id?: number) => Promise<{ success: boolean; data?: AssetType; error?: string }>;
+  deleteAssetType: (id: number) => Promise<{ success: boolean; error?: string }>;
   deleteDevice: (id: string | number) => Promise<{ success: boolean; error?: string }>;
   getDeviceFolder: (id: string | number) => Promise<{ success: boolean; data?: any; error?: string }>;
   uploadToDeviceFolder: (id: string | number, fileName: string, fileDataUrl: string) => Promise<{ success: boolean; files?: any[]; error?: string }>;
@@ -94,6 +99,24 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceRecord[]>([]);
+  const [assetTypes, setAssetTypes] = useState<AssetType[]>([]);
+
+  const authHeaders = (json = false): Record<string, string> => {
+    const token = localStorage.getItem('auth_token');
+    return { ...(json ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+  };
+
+  const fetchAssetTypes = useCallback(async () => {
+    try {
+      const res = await fetch('/api/asset-types', { headers: authHeaders() });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) setAssetTypes(json.data);
+      }
+    } catch (e: any) {
+      console.warn('Failed to fetch asset types:', e?.message || e);
+    }
+  }, []);
 
   const fetchMaintenanceRecords = useCallback(async (params?: { assetId?: number | string; ticketId?: number | string }) => {
     try {
@@ -203,12 +226,14 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     if (!currentUser) {
       setDevices([]);
       setMaintenanceRecords([]);
+      setAssetTypes([]);
       try { localStorage.removeItem('crpd_electronic_devices_v1'); } catch {}
       return;
     }
     fetchDevices();
     fetchMaintenanceRecords();
-  }, [currentUser?.uid, fetchDevices, fetchMaintenanceRecords]);
+    fetchAssetTypes();
+  }, [currentUser?.uid, fetchDevices, fetchMaintenanceRecords, fetchAssetTypes]);
 
   const addDevice = async (deviceData: Partial<ElectronicDevice>): Promise<{ success: boolean; data?: ElectronicDevice; error?: string }> => {
     const token = localStorage.getItem('auth_token');
@@ -291,6 +316,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
             saveToStorage(next);
             return next;
           });
+          await fetchMaintenanceRecords();
           return { success: true };
         }
       }
@@ -365,7 +391,8 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       });
       const json = await res.json();
       if (res.ok && json.success) {
-        await fetchMaintenanceRecords();
+        // The device status follows its maintenance (e.g. "Under Maintenance"), so reload both.
+        await Promise.all([fetchMaintenanceRecords(), fetchDevices()]);
         return { success: true, data: json.data };
       }
       return { success: false, error: json.error || 'Failed to create maintenance record' };
@@ -384,9 +411,56 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       const json = await res.json();
       if (res.ok && json.success) {
         setMaintenanceRecords(prev => prev.filter(m => m.id !== id));
+        await fetchDevices();
         return { success: true };
       }
       return { success: false, error: json.error || 'Failed to delete maintenance record' };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  };
+
+  const updateMaintenanceTableRecord = async (id: number, data: Partial<MaintenanceRecord>): Promise<{ success: boolean; data?: any; error?: string }> => {
+    try {
+      const res = await fetch(`/api/maintenance/${id}`, { method: 'PUT', headers: authHeaders(true), body: JSON.stringify(data) });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) {
+        await Promise.all([fetchMaintenanceRecords(), fetchDevices()]);
+        return { success: true, data: json.data };
+      }
+      return { success: false, error: json.error || 'Failed to update maintenance record' };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  };
+
+  const saveAssetType = async (data: Partial<AssetType>, id?: number): Promise<{ success: boolean; data?: AssetType; error?: string }> => {
+    try {
+      const res = await fetch(id ? `/api/asset-types/${id}` : '/api/asset-types', {
+        method: id ? 'PUT' : 'POST',
+        headers: authHeaders(true),
+        body: JSON.stringify(data)
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) {
+        await fetchAssetTypes();
+        return { success: true, data: json.data };
+      }
+      return { success: false, error: json.error || 'Failed to save asset type' };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  };
+
+  const deleteAssetType = async (id: number): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch(`/api/asset-types/${id}`, { method: 'DELETE', headers: authHeaders() });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) {
+        await fetchAssetTypes();
+        return { success: true };
+      }
+      return { success: false, error: json.error || 'Failed to delete asset type' };
     } catch (err: any) {
       return { success: false, error: err.message };
     }
@@ -481,6 +555,11 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       addMaintenanceRecord,
       createMaintenanceTableRecord,
       deleteMaintenanceTableRecord,
+      updateMaintenanceTableRecord,
+      assetTypes,
+      fetchAssetTypes,
+      saveAssetType,
+      deleteAssetType,
       deleteDevice,
       getDeviceFolder,
       uploadToDeviceFolder,
