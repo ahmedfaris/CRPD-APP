@@ -11,7 +11,6 @@ import {
   createOrUpdateDeviceFolder,
   listDeviceFolderFiles,
   syncAllExistingDevicesToDisk,
-  ensureOrgHierarchySeeded,
   generateNextDeviceCode,
   ASSET_ARCHIVE_STORAGE_DIR,
   ASSET_ARCHIVE_STORAGE_DIR_NAME,
@@ -34,13 +33,12 @@ function parseDeviceId(req: AuthRequest, res: Response): number | null {
 const isUniqueViolation = (err: any) =>
   err?.code === '23505' || err?.cause?.code === '23505' || /duplicate key|unique constraint/i.test(String(err?.cause?.message || err?.message || ''));
 
-// Startup initialization: seed org hierarchy & sync folders in background
+// Startup initialization: sync device folders in background
 let isInitialized = false;
 async function initializeDeviceFolders() {
   if (isInitialized) return;
   isInitialized = true;
   try {
-    await ensureOrgHierarchySeeded();
     await syncAllExistingDevicesToDisk();
   } catch (e) {
     console.error('Initialization error for device folders:', e);

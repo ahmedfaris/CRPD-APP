@@ -227,16 +227,8 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
   // Department List sourced directly from Organizational Structure
   const orgDepts = getAllDepartments();
   const allDepartmentsList = useMemo(() => {
-    if (orgDepts && orgDepts.length > 0) {
-      return orgDepts.map(d => language === 'ar' ? (d.nameAr || d.nameEn) : d.nameEn);
-    }
-    return [
-      language === 'ar' ? 'تكنولوجيا المعلومات' : 'Information Technology',
-      language === 'ar' ? 'العمليات والتنفيذ' : 'Operations',
-      language === 'ar' ? 'الأرشفة الإلكترونية والسجلات' : 'Electronic Archiving & Records',
-      language === 'ar' ? 'دعم العملاء ومكتب المساعدة' : 'Customer Support & Helpdesk',
-      language === 'ar' ? 'الموارد البشرية' : 'Human Resources'
-    ];
+    // Departments come only from the organizational structure (no built-in examples).
+    return (orgDepts || []).map(d => language === 'ar' ? (d.nameAr || d.nameEn) : d.nameEn);
   }, [orgDepts, language]);
 
   // Helper Icon for Device Types
@@ -564,8 +556,8 @@ export function DeviceManagementApp({ onBackToMetro }: DeviceManagementAppProps)
       !isSameDepartment(d.nameAr, dev.department)
     );
     const target = available[0] || orgDepts[0];
-    setTransferTargetDept(target ? target.nameEn : 'Operations');
-    setTransferTargetDeptAr(target ? target.nameAr : 'العمليات والتنفيذ');
+    setTransferTargetDept(target ? target.nameEn : '');
+    setTransferTargetDeptAr(target ? target.nameAr : '');
     setTransferReason('');
     setTransferDate(new Date().toISOString().split('T')[0]);
   };

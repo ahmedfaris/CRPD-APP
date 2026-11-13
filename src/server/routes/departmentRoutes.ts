@@ -7,6 +7,70 @@ import { logger } from '../utils/logger.ts';
 
 const router = Router();
 
+/**
+ * Brief information kept for every unit (organization, directorate, department, division).
+ * Stored as JSON in the `description` column together with the Arabic name and unit type,
+ * so no schema change is needed.
+ */
+const DETAIL_LIMITS = { shortName: 20, description: 500, location: 150, phone: 30, email: 120 } as const;
+type UnitDetails = { shortName: string; description: string; location: string; phone: string; email: string };
+const EMPTY_DETAILS: UnitDetails = { shortName: '', description: '', location: '', phone: '', email: '' };
+
+/** Parse the stored JSON (older rows may hold plain text or nothing). */
+function parseStored(raw: string | null | undefined): { nameAr: string; orgType: string } & UnitDetails {
+  let parsed: any = {};
+  if (raw && raw.trim().startsWith('{')) {
+    try { parsed = JSON.parse(raw); } catch { parsed = {}; }
+  } else if (raw) {
+    parsed = { description: raw };
+  }
+  const str = (v: any) => (typeof v === 'string' ? v : '');
+  return {
+    nameAr: str(parsed.nameAr),
+    orgType: str(parsed.orgType) || 'department',
+    shortName: str(parsed.shortName),
+    description: str(parsed.description),
+    location: str(parsed.location),
+    phone: str(parsed.phone),
+    email: str(parsed.email),
+  };
+}
+
+/**
+ * Read the brief-information fields from a request. A field that is not sent keeps its
+ * current value (`current`); an empty string clears it. Returns an error message when invalid.
+ */
+function readDetails(body: any, current: UnitDetails): { details: UnitDetails } | { error: string } {
+  // Copy only the detail fields (the stored record also holds nameAr/orgType).
+  const details: UnitDetails = {
+    shortName: current.shortName, description: current.description, location: current.location,
+    phone: current.phone, email: current.email,
+  };
+  for (const key of Object.keys(DETAIL_LIMITS) as Array<keyof UnitDetails>) {
+    const value = body?.[key];
+    if (value === undefined) continue;
+    if (value !== null && typeof value !== 'string') return { error: `Invalid value for ${key}` };
+    const trimmed = (value ?? '').trim();
+    if (trimmed.length > DETAIL_LIMITS[key]) {
+      return { error: `${key} must be at most ${DETAIL_LIMITS[key]} characters` };
+    }
+    details[key] = trimmed;
+  }
+  if (details.phone && !/^[0-9+\-\s()]+$/.test(details.phone)) {
+    return { error: 'Phone number may only contain digits, spaces, +, - and parentheses' };
+  }
+  if (details.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(details.email)) {
+    return { error: 'Invalid email address' };
+  }
+  return { details };
+}
+
+function storeUnit(nameAr: string, orgType: string, details: UnitDetails): string {
+  return JSON.stringify({ nameAr, orgType, ...details });
+}
+
+const VALID_TYPES = ['org', 'directorate', 'department', 'division'];
+
 // Who may change the structure (mirrors the UI's canManageOrg): admins (Admin / Administrator /
 // System Admin roles or '*') and roles with an Organization Structure or org.manage permission.
 // Roles are read from the database, not the login token, so changes apply immediately.
@@ -104,36 +168,19 @@ router.get('/', requireAuth, async (req: AuthRequest, res) => {
       avatarColor: users.avatarColor
     }).from(users);
 
-    const defaultArabicMap: Record<string, string> = {
-      'Information Technology': 'تكنولوجيا المعلومات',
-      'Electronic Archiving & Records': 'الأرشفة الإلكترونية والسجلات',
-      'Customer Support & Helpdesk': 'دعم العملاء ومكتب المساعدة',
-      'Human Resources': 'الموارد البشرية',
-      'Operations': 'العمليات والتنفيذ',
-      'IT Service Desk': 'مكتب خدمة تكنولوجيا المعلومات',
-      'Software Development': 'تطوير البرمجيات',
-      'Cybersecurity': 'الأمن السيبراني',
-      'Cloud Infrastructure': 'البنية التحتية السحابية'
-    };
-
     const enrichedOrgs = allOrgs.map(org => {
       const manager = allUsers.find(u => u.uid === org.managerId);
-      
-      let parsedDesc = { nameAr: '', orgType: 'department', description: '' };
-      try {
-        if (org.description && org.description.startsWith('{')) {
-          parsedDesc = JSON.parse(org.description);
-        }
-      } catch (e) {}
-
-      const resolvedNameAr = parsedDesc.nameAr || defaultArabicMap[org.name] || org.name;
-
+      const stored = parseStored(org.description);
       return {
         ...org,
         nameEn: org.name,
-        nameAr: resolvedNameAr,
-        orgType: parsedDesc.orgType || 'department',
-        description: parsedDesc.description || '',
+        nameAr: stored.nameAr || org.name,
+        orgType: stored.orgType,
+        shortName: stored.shortName,
+        description: stored.description,
+        location: stored.location,
+        phone: stored.phone,
+        email: stored.email,
         manager: manager ? { fullName: manager.fullName, email: manager.email, avatarColor: manager.avatarColor } : null
       };
     });
@@ -148,7 +195,7 @@ router.get('/', requireAuth, async (req: AuthRequest, res) => {
 // POST /api/departments - Create new organizational unit
 router.post('/', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
-    const { nameEn, nameAr, orgType, description, parentId, managerId } = req.body;
+    const { nameEn, nameAr, orgType, parentId, managerId } = req.body;
     
     if (!nameEn || !nameEn.trim()) {
       return res.status(400).json({ error: 'English Name is required' });
@@ -156,12 +203,15 @@ router.post('/', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
     if (!nameAr || !nameAr.trim()) {
       return res.status(400).json({ error: 'Arabic Name is required' });
     }
-
-    const payloadDesc = JSON.stringify({
-      nameAr: nameAr.trim(),
-      orgType: orgType || 'department',
-      description: description || ''
-    });
+    const type = orgType || 'department';
+    if (!VALID_TYPES.includes(type)) {
+      return res.status(400).json({ error: 'Invalid unit type' });
+    }
+    const read = readDetails(req.body, EMPTY_DETAILS);
+    if ('error' in read) {
+      return res.status(400).json({ error: read.error });
+    }
+    const payloadDesc = storeUnit(nameAr.trim(), type, read.details);
 
     const normalizedParent = normalizeParentId(parentId);
     if (normalizedParent === 'invalid') {
@@ -192,7 +242,8 @@ router.post('/', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
         ...newOrg,
         nameEn: newOrg.name,
         nameAr: nameAr.trim(),
-        orgType: orgType || 'department'
+        orgType: type,
+        ...read.details
       } 
     });
   } catch (error: any) {
@@ -206,7 +257,7 @@ router.put('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const id = parseUnitId(req, res);
     if (id === null) return;
-    const { nameEn, nameAr, orgType, description, parentId, managerId } = req.body;
+    const { nameEn, nameAr, orgType, parentId, managerId } = req.body;
 
     if (!nameEn || !nameEn.trim()) {
       return res.status(400).json({ error: 'English Name is required' });
@@ -234,11 +285,17 @@ router.put('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
       return res.status(problem.status).json({ error: problem.error });
     }
 
-    const payloadDesc = JSON.stringify({
-      nameAr: nameAr.trim(),
-      orgType: orgType || 'department',
-      description: description || ''
-    });
+    // Fields that are not sent keep their stored values (older clients only send the names).
+    const stored = parseStored(current.description);
+    const type = orgType || stored.orgType || 'department';
+    if (!VALID_TYPES.includes(type)) {
+      return res.status(400).json({ error: 'Invalid unit type' });
+    }
+    const read = readDetails(req.body, stored);
+    if ('error' in read) {
+      return res.status(400).json({ error: read.error });
+    }
+    const payloadDesc = storeUnit(nameAr.trim(), type, read.details);
 
     const updateValues: any = {
       name: nameEn.trim(),
@@ -272,7 +329,8 @@ router.put('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
         ...updatedOrg,
         nameEn: updatedOrg.name,
         nameAr: nameAr.trim(),
-        orgType: orgType || 'department'
+        orgType: type,
+        ...read.details
       } 
     });
   } catch (error: any) {

@@ -14,7 +14,12 @@ import {
   Check,
   X,
   Trash2,
-  Search
+  Search,
+  Info,
+  MapPin,
+  Phone,
+  Mail,
+  UserCircle2
 } from 'lucide-react';
 
 interface OrgStructureAppProps {
@@ -23,9 +28,50 @@ interface OrgStructureAppProps {
 
 import { useOrg, TreeNode } from '../context/OrgContext';
 
+type UnitType = 'org' | 'directorate' | 'department' | 'division';
+
+/** Brief information kept for every unit; edited in the add and edit forms. */
+interface UnitDetailsForm {
+  shortName: string;
+  description: string;
+  location: string;
+  phone: string;
+  email: string;
+  managerId: string;
+}
+
+const EMPTY_DETAILS: UnitDetailsForm = { shortName: '', description: '', location: '', phone: '', email: '', managerId: '' };
+
+const detailsFromNode = (node: TreeNode): UnitDetailsForm => ({
+  shortName: node.shortName || '',
+  description: node.description || '',
+  location: node.location || '',
+  phone: node.phone || '',
+  email: node.email || '',
+  managerId: node.managerId || ''
+});
+
+/** Same checks as the server, so mistakes are shown before saving. */
+const detailsError = (d: UnitDetailsForm, ar: boolean): string => {
+  if (d.phone.trim() && !/^[0-9+\-\s()]+$/.test(d.phone.trim())) {
+    return ar ? 'رقم الهاتف يجب أن يحتوي على أرقام فقط (ويُسمح بـ + و - والمسافات)' : 'Phone may only contain digits, spaces, + and -';
+  }
+  if (d.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email.trim())) {
+    return ar ? 'البريد الإلكتروني غير صحيح' : 'Invalid email address';
+  }
+  return '';
+};
+
+const UNIT_TYPE_LABELS: Record<UnitType, { ar: string; en: string }> = {
+  org: { ar: 'منظمة', en: 'Organization' },
+  directorate: { ar: 'دائرة', en: 'Directorate' },
+  department: { ar: 'قسم', en: 'Department' },
+  division: { ar: 'شعبة', en: 'Division' }
+};
+
 export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
   const { t, language, dir } = useLanguage();
-  const { isAdmin, hasPermission } = useAuth();
+  const { isAdmin, hasPermission, users } = useAuth();
   const canManageOrg = isAdmin || hasPermission('Organization Structure.Create') || hasPermission('Organization Structure.Edit') || hasPermission('Organization Structure.Delete') || hasPermission('Organization Structure.*') || hasPermission('org.manage');
   const { orgData, setOrgData, saveNode, deleteNode } = useOrg();
   const [errorMsg, setErrorMsg] = useState("");
@@ -33,6 +79,7 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [nodeToDelete, setNodeToDelete] = useState<TreeNode | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [infoNode, setInfoNode] = useState<TreeNode | null>(null);
 
   // Add unit modal state
   const [addModal, setAddModal] = useState<{
@@ -41,13 +88,16 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
     parentId: string;
     nameEn: string;
     nameAr: string;
+    details: UnitDetailsForm;
   }>({
     open: false,
     type: 'department',
     parentId: '',
     nameEn: '',
-    nameAr: ''
+    nameAr: '',
+    details: EMPTY_DETAILS
   });
+  const closeAddModal = () => setAddModal({ open: false, type: 'department', parentId: '', nameEn: '', nameAr: '', details: EMPTY_DETAILS });
 
   // Edit unit modal state
   const [editModal, setEditModal] = useState<{
@@ -57,14 +107,17 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
     nameAr: string;
     parentId: string;
     type: 'org' | 'directorate' | 'department' | 'division';
+    details: UnitDetailsForm;
   }>({
     open: false,
     node: null,
     nameEn: '',
     nameAr: '',
     parentId: '',
-    type: 'department'
+    type: 'department',
+    details: EMPTY_DETAILS
   });
+  const closeEditModal = () => setEditModal({ open: false, node: null, nameEn: '', nameAr: '', parentId: '', type: 'department', details: EMPTY_DETAILS });
 
   // Helper to determine primary name based on site language
   const getNodePrimaryName = (node: TreeNode): string => {
@@ -111,7 +164,8 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
     const filterNode = (node: TreeNode): TreeNode | null => {
       const nameEnMatch = (node.nameEn || '').toLowerCase().includes(query);
       const nameArMatch = (node.nameAr || '').toLowerCase().includes(query);
-      const matchesSelf = nameEnMatch || nameArMatch;
+      const shortMatch = (node.shortName || '').toLowerCase().includes(query);
+      const matchesSelf = nameEnMatch || nameArMatch || shortMatch;
 
       const filteredChildren: TreeNode[] = [];
       if (node.children && node.children.length > 0) {
@@ -144,7 +198,7 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
     let count = 0;
     const countNodes = (nodes: TreeNode[]) => {
       for (const n of nodes) {
-        if ((n.nameEn || '').toLowerCase().includes(query) || (n.nameAr || '').toLowerCase().includes(query)) {
+        if ((n.nameEn || '').toLowerCase().includes(query) || (n.nameAr || '').toLowerCase().includes(query) || (n.shortName || '').toLowerCase().includes(query)) {
           count++;
         }
         if (n.children && n.children.length > 0) countNodes(n.children);
@@ -264,12 +318,14 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
       resolvedParent = potential[0]?.id || '';
     }
 
+    setErrorMsg('');
     setAddModal({
       open: true,
       type,
       parentId: type === 'org' ? '' : resolvedParent,
       nameEn: '',
-      nameAr: ''
+      nameAr: '',
+      details: EMPTY_DETAILS
     });
   };
 
@@ -283,13 +339,24 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
       setErrorMsg(language === 'ar' ? 'يرجى إدخال الاسم باللغة العربية' : 'Please enter Arabic name');
       return;
     }
+    const addDetailsProblem = detailsError(addModal.details, language === 'ar');
+    if (addDetailsProblem) {
+      setErrorMsg(addDetailsProblem);
+      return;
+    }
 
     const newNode: TreeNode = {
       id: '',
       nameEn: addModal.nameEn.trim(),
       nameAr: addModal.nameAr.trim(),
       type: addModal.type,
-      children: []
+      children: [],
+      shortName: addModal.details.shortName.trim(),
+      description: addModal.details.description.trim(),
+      location: addModal.details.location.trim(),
+      phone: addModal.details.phone.trim(),
+      email: addModal.details.email.trim(),
+      managerId: addModal.details.managerId || null
     };
 
     const res = await saveNode(newNode, addModal.type === 'org' ? null : (addModal.parentId || null));
@@ -299,7 +366,8 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
       } else {
         setExpandedNodes(prev => new Set([...prev, `db_${res.data.id}`]));
       }
-      setAddModal({ open: false, type: 'department', parentId: '', nameEn: '', nameAr: '' });
+      closeAddModal();
+      setErrorMsg('');
     } else {
       setErrorMsg(res.error || (language === 'ar' ? 'فشل إنشاء الوحدة التنظيمية' : 'Failed to create unit'));
     }
@@ -322,13 +390,15 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
 
     const parentId = findParentId(orgData, node.id);
 
+    setErrorMsg('');
     setEditModal({
       open: true,
       node,
       nameEn: node.nameEn || '',
       nameAr: node.nameAr || '',
       parentId: parentId || '',
-      type: node.type
+      type: node.type,
+      details: detailsFromNode(node)
     });
   };
 
@@ -344,16 +414,28 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
       setErrorMsg(language === 'ar' ? 'يرجى إدخال الاسم باللغة العربية' : 'Please enter Arabic name');
       return;
     }
+    const editDetailsProblem = detailsError(editModal.details, language === 'ar');
+    if (editDetailsProblem) {
+      setErrorMsg(editDetailsProblem);
+      return;
+    }
 
     const updatedNode: TreeNode = {
       ...editModal.node,
       nameEn: editModal.nameEn.trim(),
-      nameAr: editModal.nameAr.trim()
+      nameAr: editModal.nameAr.trim(),
+      shortName: editModal.details.shortName.trim(),
+      description: editModal.details.description.trim(),
+      location: editModal.details.location.trim(),
+      phone: editModal.details.phone.trim(),
+      email: editModal.details.email.trim(),
+      managerId: editModal.details.managerId || null
     };
 
     const res = await saveNode(updatedNode, editModal.type === 'org' ? null : (editModal.parentId || null));
     if (res.success) {
-      setEditModal({ open: false, node: null, nameEn: '', nameAr: '', parentId: '', type: 'department' });
+      closeEditModal();
+      setErrorMsg('');
     } else {
       setErrorMsg(res.error || (language === 'ar' ? 'فشل حفظ التعديلات' : 'Failed to save changes'));
     }
@@ -398,6 +480,76 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
     setNodeToDelete(null);
   };
 
+  const typeLabel = (type: UnitType) => (language === 'ar' ? UNIT_TYPE_LABELS[type]?.ar : UNIT_TYPE_LABELS[type]?.en) || type;
+
+  const managerName = (node: TreeNode): string => {
+    if (node.manager?.fullName) return node.manager.fullName;
+    const u = (users || []).find((x: any) => x.uid === node.managerId);
+    return u?.fullName || '';
+  };
+
+  const findParentNode = (nodes: TreeNode[], targetId: string, parent: TreeNode | null = null): TreeNode | null => {
+    for (const n of nodes) {
+      if (n.id === targetId) return parent;
+      const found = findParentNode(n.children || [], targetId, n);
+      if (found) return found;
+    }
+    return null;
+  };
+
+  const countDescendants = (node: TreeNode): number =>
+    (node.children || []).reduce((sum, c) => sum + 1 + countDescendants(c), 0);
+
+  /** Brief-information inputs shared by the add and edit forms. */
+  const renderDetailFields = (details: UnitDetailsForm, onChange: (next: UnitDetailsForm) => void, accent: 'amber' | 'blue') => {
+    const ring = accent === 'amber' ? 'focus:ring-amber-500/20 focus:border-amber-500' : 'focus:ring-blue-500/20 focus:border-blue-500';
+    const input = `w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none transition focus:ring-2 ${ring}`;
+    const label = 'block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5';
+    const set = (key: keyof UnitDetailsForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+      onChange({ ...details, [key]: e.target.value });
+    return (
+      <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+        <p className="text-xs font-bold text-slate-500 dark:text-slate-400">
+          {language === 'ar' ? 'بيانات مختصرة (اختيارية)' : 'Brief information (optional)'}
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label className={label}>{language === 'ar' ? 'الرمز / الاسم المختصر' : 'Code / short name'}</label>
+            <input type="text" value={details.shortName} onChange={set('shortName')} maxLength={20} className={input} data-field="shortName" />
+          </div>
+          <div className="sm:col-span-2">
+            <label className={label}>{language === 'ar' ? 'المسؤول' : 'Manager'}</label>
+            <select value={details.managerId} onChange={set('managerId')} className={input} data-field="managerId">
+              <option value="">{language === 'ar' ? '— بدون —' : '— None —'}</option>
+              {(users || []).map((u: any) => (
+                <option key={u.uid} value={u.uid}>{u.fullName} ({u.email})</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label className={label}>{language === 'ar' ? 'نبذة مختصرة عن المهام' : 'Short description of responsibilities'}</label>
+          <textarea value={details.description} onChange={set('description')} maxLength={500} rows={2} className={`${input} resize-none`} data-field="description" />
+          <p className="text-[10px] text-slate-400 mt-0.5 text-end">{details.description.length}/500</p>
+        </div>
+        <div>
+          <label className={label}>{language === 'ar' ? 'الموقع' : 'Location'}</label>
+          <input type="text" value={details.location} onChange={set('location')} maxLength={150} className={input} data-field="location" />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className={label}>{language === 'ar' ? 'رقم الهاتف' : 'Phone'}</label>
+            <input type="tel" value={details.phone} onChange={set('phone')} maxLength={30} dir="ltr" className={input} data-field="phone" />
+          </div>
+          <div>
+            <label className={label}>{language === 'ar' ? 'البريد الإلكتروني' : 'Email'}</label>
+            <input type="email" value={details.email} onChange={set('email')} maxLength={120} dir="ltr" className={input} data-field="email" />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderTree = (node: TreeNode, depth: number = 0) => {
     const isExpanded = expandedNodes.has(node.id);
     const hasChildren = node.children.length > 0;
@@ -426,27 +578,54 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
           </div>
           <Icon className="w-4 h-4 text-amber-500 mr-2 rtl:mr-0 rtl:ml-2 shrink-0" />
           
-          <div className="flex items-center flex-wrap gap-x-2 min-w-0 flex-1">
-            <span className="font-semibold text-slate-800 dark:text-slate-100 text-sm">
-              {highlightText(primaryName, searchQuery)}
-            </span>
-            {secondaryName && secondaryName !== primaryName && (
-              <span className="text-xs text-slate-400 dark:text-slate-500 font-normal">
-                ({highlightText(secondaryName, searchQuery)})
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center flex-wrap gap-x-2">
+              <span className="font-semibold text-slate-800 dark:text-slate-100 text-sm">
+                {highlightText(primaryName, searchQuery)}
               </span>
+              {node.shortName && (
+                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800/60" data-role="short-name">
+                  {highlightText(node.shortName, searchQuery)}
+                </span>
+              )}
+              {secondaryName && secondaryName !== primaryName && (
+                <span className="text-xs text-slate-400 dark:text-slate-500 font-normal">
+                  ({highlightText(secondaryName, searchQuery)})
+                </span>
+              )}
+            </div>
+            {(node.description || managerName(node)) && (
+              <div className="flex items-center flex-wrap gap-x-3 mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                {node.description && <span className="truncate max-w-xl" data-role="description">{node.description}</span>}
+                {managerName(node) && (
+                  <span className="inline-flex items-center gap-1 shrink-0">
+                    <UserCircle2 className="w-3 h-3" />
+                    {managerName(node)}
+                  </span>
+                )}
+              </div>
             )}
           </div>
 
-          <span className="mx-2 text-[10px] px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700 uppercase shrink-0">
-            {node.type}
+          <span className="mx-2 text-[10px] px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700 shrink-0">
+            {typeLabel(node.type)}
           </span>
+
+          <button
+            onClick={(e) => { e.stopPropagation(); setInfoNode(node); }}
+            className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors shrink-0"
+            title={language === 'ar' ? 'عرض البيانات المختصرة' : 'View brief information'}
+            data-role="info"
+          >
+            <Info className="w-3.5 h-3.5" />
+          </button>
 
           {canManageOrg && (
             <div className="flex items-center space-x-1 rtl:space-x-reverse opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
               <button 
                 onClick={(e) => handleStartEdit(e, node)} 
                 className="p-1 rounded-md hover:bg-blue-50 dark:hover:bg-blue-900/40 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors mx-0.5"
-                title={language === 'ar' ? 'تعديل الاسمين الإنجليزي والعربي' : 'Edit English & Arabic Names'}
+                title={language === 'ar' ? 'تعديل الوحدة وبياناتها' : 'Edit unit and its information'}
               >
                 <Edit3 className="w-3.5 h-3.5" />
               </button>
@@ -535,7 +714,7 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
                     className="flex items-center space-x-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition"
                   >
                     <Plus className="w-3.5 h-3.5 mx-1" />
-                    <span>{language === 'ar' ? 'إضافة إدارة عامة' : 'Add Directorate'}</span>
+                    <span>{language === 'ar' ? 'إضافة دائرة' : 'Add Directorate'}</span>
                   </button>
                   <button 
                     onClick={() => openAddModal('department')}
@@ -562,7 +741,7 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
       <div className="flex-1 max-w-7xl mx-auto w-full p-4 sm:p-6 lg:p-8 relative">
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 sm:p-6">
           
-        {errorMsg && (
+        {errorMsg && !addModal.open && !editModal.open && (
           <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-xl flex items-center justify-between">
             <div className="flex items-center text-red-600 dark:text-red-400 text-sm">
               <svg className="w-4 h-4 mr-2 rtl:mr-0 rtl:ml-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -581,7 +760,7 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
                 {language === 'ar' ? 'عرض الهيكل التنظيمي' : 'Structure Overview'}
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                {language === 'ar' ? 'تصفح وإدارة الوحدات التنظيمية، الإدارات العامة، الأقسام والشعب' : 'Browse and manage organizational units, directorates, departments, and divisions'}
+                {language === 'ar' ? 'تصفح وإدارة الوحدات التنظيمية: الدوائر والأقسام والشعب' : 'Browse and manage organizational units, directorates, departments, and divisions'}
               </p>
             </div>
             
@@ -655,7 +834,31 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
           </div>
 
           <div className="border border-slate-100 dark:border-slate-800/60 rounded-xl p-4 bg-slate-50/50 dark:bg-slate-900/50 flex flex-col gap-2">
-            {filteredOrgData.length === 0 ? (
+            {orgData.length === 0 ? (
+              <div className="py-12 px-4 text-center" data-role="empty-structure">
+                <div className="w-12 h-12 mx-auto rounded-full bg-amber-50 dark:bg-amber-900/30 flex items-center justify-center text-amber-500 mb-3">
+                  <Building2 className="w-6 h-6" />
+                </div>
+                <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-1">
+                  {language === 'ar' ? 'لا توجد وحدات تنظيمية بعد' : 'No organizational units yet'}
+                </h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto">
+                  {canManageOrg
+                    ? (language === 'ar' ? 'ابدأ بإضافة المنظمة، ثم أضف الدوائر والأقسام والشعب التابعة لها.' : 'Start by adding the organization, then its directorates, departments and divisions.')
+                    : (language === 'ar' ? 'لم يقم المسؤول بإضافة الهيكل التنظيمي بعد.' : 'An administrator has not added the structure yet.')}
+                </p>
+                {canManageOrg && (
+                  <button
+                    type="button"
+                    onClick={() => openAddModal('org')}
+                    className="mt-4 inline-flex items-center space-x-1 rtl:space-x-reverse px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white transition shadow-sm cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5 mx-1" />
+                    <span>{language === 'ar' ? 'إضافة منظمة' : 'Add organization'}</span>
+                  </button>
+                )}
+              </div>
+            ) : filteredOrgData.length === 0 ? (
               <div className="py-12 px-4 text-center">
                 <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 dark:text-slate-500 mb-3">
                   <Search className="w-6 h-6" />
@@ -725,10 +928,75 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
           </div>
         )}
 
+        {/* Brief information card */}
+        {infoNode && (() => {
+          const parent = findParentNode(orgData, infoNode.id);
+          const rows: Array<{ icon: React.ReactNode; label: string; value: React.ReactNode }> = [
+            { icon: <Building2 className="w-4 h-4" />, label: language === 'ar' ? 'تتبع لـ' : 'Part of', value: parent ? getNodePrimaryName(parent) : '' },
+            { icon: <UserCircle2 className="w-4 h-4" />, label: language === 'ar' ? 'المسؤول' : 'Manager', value: managerName(infoNode) },
+            { icon: <MapPin className="w-4 h-4" />, label: language === 'ar' ? 'الموقع' : 'Location', value: infoNode.location },
+            { icon: <Phone className="w-4 h-4" />, label: language === 'ar' ? 'الهاتف' : 'Phone', value: infoNode.phone ? <span dir="ltr">{infoNode.phone}</span> : '' },
+            { icon: <Mail className="w-4 h-4" />, label: language === 'ar' ? 'البريد الإلكتروني' : 'Email', value: infoNode.email ? <a href={`mailto:${infoNode.email}`} className="text-blue-600 hover:underline" dir="ltr">{infoNode.email}</a> : '' },
+            { icon: <GitBranch className="w-4 h-4" />, label: language === 'ar' ? 'الوحدات التابعة' : 'Sub-units', value: String(countDescendants(infoNode)) }
+          ];
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={() => setInfoNode(null)}>
+              <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-800 overflow-hidden" onClick={(e) => e.stopPropagation()} data-role="info-card">
+                <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-start justify-between gap-3 bg-slate-50/50 dark:bg-slate-800/30">
+                  <div className="min-w-0">
+                    <div className="flex items-center flex-wrap gap-2">
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800/60">
+                        {typeLabel(infoNode.type)}
+                      </span>
+                      {infoNode.shortName && (
+                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">{infoNode.shortName}</span>
+                      )}
+                    </div>
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white mt-1.5">{getNodePrimaryName(infoNode)}</h3>
+                    {getNodeSecondaryName(infoNode) && (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{getNodeSecondaryName(infoNode)}</p>
+                    )}
+                  </div>
+                  <button type="button" onClick={() => setInfoNode(null)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="p-6 space-y-4">
+                  <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
+                    {infoNode.description || (
+                      <span className="text-slate-400 italic">{language === 'ar' ? 'لا توجد نبذة مختصرة لهذه الوحدة.' : 'No short description for this unit.'}</span>
+                    )}
+                  </p>
+                  <dl className="divide-y divide-slate-100 dark:divide-slate-800 text-sm">
+                    {rows.map((r, i) => (
+                      <div key={i} className="flex items-center justify-between gap-3 py-2">
+                        <dt className="flex items-center gap-2 text-slate-500 dark:text-slate-400 shrink-0">{r.icon}{r.label}</dt>
+                        <dd className="font-medium text-slate-800 dark:text-slate-100 text-end min-w-0 break-words">{r.value || <span className="text-slate-300 dark:text-slate-600">—</span>}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {canManageOrg && (
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="button"
+                        onClick={(e) => { const n = infoNode; setInfoNode(null); handleStartEdit(e, n); }}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition cursor-pointer"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                        {language === 'ar' ? 'تعديل البيانات' : 'Edit information'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Add Unit Modal - Bilingual Creation */}
         {addModal.open && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-150">
-            <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-800 overflow-hidden">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-800 overflow-y-auto max-h-[92vh]">
               {/* Header */}
               <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/30">
                 <div className="flex items-center space-x-3 rtl:space-x-reverse">
@@ -738,18 +1006,18 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
                   <div>
                     <h3 className="text-base font-bold text-slate-900 dark:text-white">
                       {addModal.type === 'org' && (language === 'ar' ? 'إضافة منظمة جديدة' : 'Add New Organization')}
-                      {addModal.type === 'directorate' && (language === 'ar' ? 'إضافة إدارة عامة جديدة' : 'Add New Directorate')}
+                      {addModal.type === 'directorate' && (language === 'ar' ? 'إضافة دائرة جديدة' : 'Add New Directorate')}
                       {addModal.type === 'department' && (language === 'ar' ? 'إضافة قسم جديد' : 'Add New Department')}
                       {addModal.type === 'division' && (language === 'ar' ? 'إضافة شعبة جديدة' : 'Add New Division')}
                     </h3>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {language === 'ar' ? 'أدخل الاسم باللغتين الإنجليزية والعربية' : 'Enter both English and Arabic names'}
+                      {language === 'ar' ? 'أدخل الاسم باللغتين والبيانات المختصرة' : 'Enter both names and brief information'}
                     </p>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setAddModal({ open: false, type: 'department', parentId: '', nameEn: '', nameAr: '' })}
+                  onClick={closeAddModal}
                   className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
                 >
                   <X className="w-4 h-4" />
@@ -783,7 +1051,7 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
                         }`}
                       >
                         {t === 'org' && (language === 'ar' ? 'منظمة' : 'Org')}
-                        {t === 'directorate' && (language === 'ar' ? 'إدارة عامة' : 'Directorate')}
+                        {t === 'directorate' && (language === 'ar' ? 'دائرة' : 'Directorate')}
                         {t === 'department' && (language === 'ar' ? 'قسم' : 'Dept')}
                         {t === 'division' && (language === 'ar' ? 'شعبة' : 'Division')}
                       </button>
@@ -796,7 +1064,7 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                       {addModal.type === 'directorate' && (language === 'ar' ? 'المنظمة التابعة لها' : 'Parent Organization')}
-                      {addModal.type === 'department' && (language === 'ar' ? 'الإدارة العامة أو المنظمة التابعة لها' : 'Parent Directorate / Org')}
+                      {addModal.type === 'department' && (language === 'ar' ? 'الدائرة أو المنظمة التابع لها' : 'Parent Directorate / Org')}
                       {addModal.type === 'division' && (language === 'ar' ? 'القسم أو الإدارة التابع لها' : 'Parent Department / Directorate')}
                       <span className="text-red-500"> *</span>
                     </label>
@@ -808,7 +1076,7 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
                     >
                       {getPotentialParents(addModal.type).map((u) => (
                         <option key={u.id} value={u.id}>
-                          {language === 'ar' ? (u.nameAr || u.nameEn) : (u.nameEn || u.nameAr)} ({u.type})
+                          {language === 'ar' ? (u.nameAr || u.nameEn) : (u.nameEn || u.nameAr)} ({typeLabel(u.type)})
                         </option>
                       ))}
                     </select>
@@ -853,7 +1121,7 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
                       addModal.type === 'org'
                         ? 'مثال: الهيئة المركزية للتكنولوجيا'
                         : addModal.type === 'directorate'
-                        ? 'مثال: الإدارة العامة لتكنولوجيا المعلومات'
+                        ? 'مثال: دائرة تكنولوجيا المعلومات'
                         : addModal.type === 'department'
                         ? 'مثال: قسم نظم البرمجيات'
                         : 'مثال: شعبة واجهات المستخدم'
@@ -864,11 +1132,19 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
                   />
                 </div>
 
+                {renderDetailFields(addModal.details, (details) => setAddModal(prev => ({ ...prev, details })), 'amber')}
+
+                {errorMsg && (
+                  <p className="text-xs font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-lg px-3 py-2" role="alert" data-role="form-error">
+                    {errorMsg}
+                  </p>
+                )}
+
                 {/* Actions */}
                 <div className="flex items-center justify-end space-x-3 rtl:space-x-reverse pt-3 border-t border-slate-100 dark:border-slate-800">
                   <button
                     type="button"
-                    onClick={() => setAddModal({ open: false, type: 'department', parentId: '', nameEn: '', nameAr: '' })}
+                    onClick={closeAddModal}
                     className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition cursor-pointer"
                   >
                     {language === 'ar' ? 'إلغاء' : 'Cancel'}
@@ -889,7 +1165,7 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
         {/* Edit Unit Modal - Bilingual Editing */}
         {editModal.open && editModal.node && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-150">
-            <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-800 overflow-hidden">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-800 overflow-y-auto max-h-[92vh]">
               {/* Header */}
               <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/30">
                 <div className="flex items-center space-x-3 rtl:space-x-reverse">
@@ -901,13 +1177,13 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
                       {language === 'ar' ? 'تعديل الوحدة التنظيمية' : 'Edit Organizational Unit'}
                     </h3>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {language === 'ar' ? 'تعديل الاسمين باللغة الإنجليزية والعربية' : 'Edit English and Arabic names'}
+                      {language === 'ar' ? 'تعديل الاسمين والبيانات المختصرة' : 'Edit names and brief information'}
                     </p>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setEditModal({ open: false, node: null, nameEn: '', nameAr: '', parentId: '', type: 'department' })}
+                  onClick={closeEditModal}
                   className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
                 >
                   <X className="w-4 h-4" />
@@ -921,8 +1197,8 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
                   <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
                     {language === 'ar' ? 'نوع الوحدة التنظيمية:' : 'Unit Type:'}
                   </span>
-                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800/60 uppercase">
-                    {editModal.type}
+                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800/60">
+                    {typeLabel(editModal.type)}
                   </span>
                 </div>
 
@@ -952,7 +1228,7 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
                     type="text"
                     value={editModal.nameAr}
                     onChange={(e) => setEditModal(prev => ({ ...prev, nameAr: e.target.value }))}
-                    placeholder="مثال: الإدارة العامة لتكنولوجيا المعلومات"
+                    placeholder="مثال: دائرة تكنولوجيا المعلومات"
                     dir="rtl"
                     className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition"
                     required
@@ -972,18 +1248,26 @@ export function OrgStructureApp({ onBackToMetro }: OrgStructureAppProps) {
                     >
                       {getPotentialParents(editModal.type, editModal.node.id).map((p) => (
                         <option key={p.id} value={p.id}>
-                          {language === 'ar' ? (p.nameAr || p.nameEn) : (p.nameEn || p.nameAr)} ({p.type})
+                          {language === 'ar' ? (p.nameAr || p.nameEn) : (p.nameEn || p.nameAr)} ({typeLabel(p.type)})
                         </option>
                       ))}
                     </select>
                   </div>
                 )}
 
+                {renderDetailFields(editModal.details, (details) => setEditModal(prev => ({ ...prev, details })), 'blue')}
+
+                {errorMsg && (
+                  <p className="text-xs font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-lg px-3 py-2" role="alert" data-role="form-error">
+                    {errorMsg}
+                  </p>
+                )}
+
                 {/* Actions */}
                 <div className="flex items-center justify-end space-x-3 rtl:space-x-reverse pt-3 border-t border-slate-100 dark:border-slate-800">
                   <button
                     type="button"
-                    onClick={() => setEditModal({ open: false, node: null, nameEn: '', nameAr: '', parentId: '', type: 'department' })}
+                    onClick={closeEditModal}
                     className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition cursor-pointer"
                   >
                     {language === 'ar' ? 'إلغاء' : 'Cancel'}

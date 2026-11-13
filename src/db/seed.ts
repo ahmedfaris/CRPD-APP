@@ -68,49 +68,9 @@ export async function seedDatabaseIfEmpty() {
       console.log('✅ Standard roles seeded.');
     }
 
-    // 4. Seed Departments if empty
-    const allDepts = await db.select().from(departments);
-    if (allDepts.length === 0) {
-      console.log('⚡ Seeding organizational departments...');
-      await db.insert(departments).values([
-        {
-          name: 'Information Technology',
-          description: JSON.stringify({ nameAr: 'تكنولوجيا المعلومات', orgType: 'department', description: 'Infrastructure, systems administration, software support and IT helpdesk.' }),
-          managerId: 'admin_uid_seed'
-        },
-        {
-          name: 'Operations',
-          description: JSON.stringify({ nameAr: 'العمليات والتنفيذ', orgType: 'department', description: 'Operational execution, logistics, and field support.' }),
-          managerId: 'admin_uid_seed'
-        },
-        {
-          name: 'Electronic Archiving & Records',
-          description: JSON.stringify({ nameAr: 'الأرشفة الإلكترونية والسجلات', orgType: 'department', description: 'Document management, secure digital archiving, and record classification.' }),
-          managerId: 'admin_uid_seed'
-        },
-        {
-          name: 'Customer Support & Helpdesk',
-          description: JSON.stringify({ nameAr: 'دعم العملاء ومكتب المساعدة', orgType: 'department', description: 'Client assistance, ticket resolution and operational inquiry triage.' }),
-          managerId: 'admin_uid_seed'
-        },
-        {
-          name: 'Human Resources',
-          description: JSON.stringify({ nameAr: 'الموارد البشرية', orgType: 'department', description: 'Personnel administration, recruitment, onboarding and staff development.' }),
-          managerId: 'admin_uid_seed'
-        }
-      ]);
-      console.log('✅ Organizational departments seeded.');
-    } else {
-      const hasOps = allDepts.some(d => d.name === 'Operations' || d.name === 'العمليات والتنفيذ');
-      if (!hasOps) {
-        await db.insert(departments).values({
-          name: 'Operations',
-          description: JSON.stringify({ nameAr: 'العمليات والتنفيذ', orgType: 'department', description: 'Operational execution, logistics, and field support.' }),
-          managerId: 'admin_uid_seed'
-        });
-        console.log('✅ Added Operations to organizational departments.');
-      }
-    }
+    // 4. Organizational structure: no example units are created. Remove the example units
+    //    that earlier versions seeded automatically (matched exactly by name and stored data).
+    await removeExampleOrgUnits();
 
     // 5. Seed Support Teams if empty
     try {
@@ -196,4 +156,41 @@ if (isDirectRun) {
       console.error('Seed task error:', err);
       process.exit(1);
     });
+}
+
+/**
+ * Example organizational units that earlier versions created on startup. A unit is removed only
+ * when both its English name and its stored data are exactly what the seeder wrote, and only
+ * once none of its sub-units are real (user-created) units. Real units are never touched.
+ */
+const EXAMPLE_ORG_UNITS: Array<{ name: string; description: string }> = [
+  { name: 'General Telecommunications & Informatics Authority', description: JSON.stringify({ nameAr: 'الهيئة العامة للاتصالات والمعلوماتية', orgType: 'org', description: 'الهيئة المركزية للاتصالات وتقنية المعلومات والتحول الرقمي للأصول والمؤسسات.' }) },
+  { name: 'Directorate of Information Technology & Cybersecurity', description: JSON.stringify({ nameAr: 'دائرة تكنولوجيا المعلومات والأمن السيبراني', orgType: 'directorate', description: 'الإشراف على البنية التحتية للحوسبة والشبكات وأمن المعلومات وإدارة الأجهزة الإلكترونية.' }) },
+  { name: 'Directorate of Operations & Administrative Support', description: JSON.stringify({ nameAr: 'دائرة العمليات والخدمات المساندة', orgType: 'directorate', description: 'إدارة العمليات الميدانية والخدمات اللوجستية والموارد البشرية ودعم العملاء.' }) },
+  { name: 'Information Technology', description: JSON.stringify({ nameAr: 'تكنولوجيا المعلومات', orgType: 'department', description: 'Infrastructure, systems administration, software support and IT helpdesk.' }) },
+  { name: 'Operations', description: JSON.stringify({ nameAr: 'العمليات والتنفيذ', orgType: 'department', description: 'Operational execution, logistics, and field support.' }) },
+  { name: 'Electronic Archiving & Records', description: JSON.stringify({ nameAr: 'الأرشفة الإلكترونية والسجلات', orgType: 'department', description: 'Document management, secure digital archiving, and record classification.' }) },
+  { name: 'Customer Support & Helpdesk', description: JSON.stringify({ nameAr: 'دعم العملاء ومكتب المساعدة', orgType: 'department', description: 'Client assistance, ticket resolution and operational inquiry triage.' }) },
+  { name: 'Human Resources', description: JSON.stringify({ nameAr: 'الموارد البشرية', orgType: 'department', description: 'Personnel administration, recruitment, onboarding and staff development.' }) },
+];
+
+export async function removeExampleOrgUnits(): Promise<number> {
+  let removed = 0;
+  try {
+    const isExample = (u: any) => EXAMPLE_ORG_UNITS.some(e => e.name === u.name && e.description === u.description);
+    // Delete leaves first; repeat until nothing more can go.
+    for (let pass = 0; pass < 10; pass++) {
+      const all = await db.select().from(departments);
+      const leaves = all.filter(u => isExample(u) && !all.some(c => c.parentId === u.id));
+      if (leaves.length === 0) break;
+      for (const u of leaves) {
+        await db.delete(departments).where(eq(departments.id, u.id));
+        removed++;
+      }
+    }
+    if (removed > 0) console.log(`🧹 Removed ${removed} example organizational unit(s).`);
+  } catch (err) {
+    console.error('Failed to remove example organizational units:', err);
+  }
+  return removed;
 }

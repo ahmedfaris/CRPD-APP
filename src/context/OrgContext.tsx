@@ -10,6 +10,13 @@ export interface TreeNode {
   managerId?: string | null;
   dbId?: number;
   parentId?: number | null;
+  // Brief information shown on the structure screen
+  shortName?: string;
+  description?: string;
+  location?: string;
+  phone?: string;
+  email?: string;
+  manager?: { fullName: string; email: string; avatarColor?: string } | null;
 }
 
 export interface OrgDepartmentItem {
@@ -61,6 +68,12 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         nameAr: item.nameAr || item.name,
         type: item.orgType as any || 'department',
         managerId: item.managerId,
+        shortName: item.shortName || '',
+        description: item.description || '',
+        location: item.location || '',
+        phone: item.phone || '',
+        email: item.email || '',
+        manager: item.manager || null,
         children: []
       });
     });
@@ -111,7 +124,8 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       const res = await fetch('/api/departments', { headers });
       if (res.ok) {
         const json = await res.json();
-        if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+        // An empty structure is valid (e.g. after deleting the last unit).
+        if (json.success && Array.isArray(json.data)) {
           setOrgData(buildTree(json.data));
         }
       }
@@ -130,7 +144,12 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         nameEn: node.nameEn,
         nameAr: node.nameAr,
         orgType: node.type,
-        managerId: node.managerId || null
+        managerId: node.managerId || null,
+        shortName: node.shortName ?? '',
+        description: node.description ?? '',
+        location: node.location ?? '',
+        phone: node.phone ?? '',
+        email: node.email ?? ''
       };
 
       if (parentId !== undefined) {
@@ -229,16 +248,6 @@ export function OrgProvider({ children }: { children: ReactNode }) {
 
     orgData.forEach(traverse);
 
-    // Fallback if orgData has not finished loading from backend yet
-    if (depts.length === 0) {
-      return [
-        { id: 'dept_it', dbId: 1, nameEn: 'Information Technology', nameAr: 'تكنولوجيا المعلومات', type: 'department' },
-        { id: 'dept_ops', dbId: 2, nameEn: 'Operations', nameAr: 'العمليات والتنفيذ', type: 'department' },
-        { id: 'dept_arch', dbId: 3, nameEn: 'Electronic Archiving & Records', nameAr: 'الأرشفة الإلكترونية والسجلات', type: 'department' },
-        { id: 'dept_help', dbId: 4, nameEn: 'Customer Support & Helpdesk', nameAr: 'دعم العملاء ومكتب المساعدة', type: 'department' },
-        { id: 'dept_hr', dbId: 5, nameEn: 'Human Resources', nameAr: 'الموارد البشرية', type: 'department' },
-      ];
-    }
     return depts;
   };
 
@@ -252,13 +261,13 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const resolveHierarchyForDept = (deptName: string, divisionName?: string): ResolvedOrgPath => {
     const norm = (deptName || '').trim().toLowerCase();
 
-    // Default fallbacks
-    let orgEn = 'General Telecommunications & Informatics Authority';
-    let orgAr = 'الهيئة العامة للاتصالات والمعلوماتية';
-    let dirEn = 'Directorate of Information Technology';
-    let dirAr = 'دائرة تكنولوجيا المعلومات والاتصالات';
-    let deptEn = deptName || 'Information Technology';
-    let deptAr = deptName || 'تكنولوجيا المعلومات';
+    // Values come only from the organizational structure; nothing is invented when a level is missing.
+    let orgEn = '';
+    let orgAr = '';
+    let dirEn = '';
+    let dirAr = '';
+    let deptEn = deptName || '';
+    let deptAr = deptName || '';
     let divEn = divisionName || '';
     let divAr = divisionName || '';
     const availableDivs: Array<{ id: string; nameEn: string; nameAr: string }> = [];
@@ -269,13 +278,12 @@ export function OrgProvider({ children }: { children: ReactNode }) {
 
     const searchTree = (nodes: TreeNode[], parents: TreeNode[]): boolean => {
       for (const n of nodes) {
-        const matchesName = 
-          (n.nameEn && n.nameEn.toLowerCase() === norm) ||
-          (n.nameAr && n.nameAr.toLowerCase() === norm) ||
-          (n.nameEn && n.nameEn.toLowerCase().includes(norm)) ||
-          (n.nameAr && n.nameAr.toLowerCase().includes(norm)) ||
-          norm.includes((n.nameEn || '').toLowerCase()) ||
-          norm.includes((n.nameAr || '').toLowerCase());
+        const en = (n.nameEn || '').trim().toLowerCase();
+        const ar = (n.nameAr || '').trim().toLowerCase();
+        // Guard against empty strings: ''.includes('') would match every unit.
+        const matchesName = !!norm && (
+          (!!en && (en === norm || en.includes(norm) || norm.includes(en))) ||
+          (!!ar && (ar === norm || ar.includes(norm) || norm.includes(ar))));
 
         if (matchesName) {
           foundNode = n;
@@ -361,15 +369,6 @@ export function OrgProvider({ children }: { children: ReactNode }) {
           orgEn = parentOrg.nameEn;
           orgAr = parentOrg.nameAr || parentOrg.nameEn;
         }
-      }
-    } else {
-      // If dept not explicitly found in tree, apply intelligent directorate grouping
-      if (norm.includes('عمليات') || norm.includes('ops') || norm.includes('موارد') || norm.includes('hr') || norm.includes('دعم')) {
-        dirAr = 'دائرة العمليات والدعم الإداري';
-        dirEn = 'Directorate of Operations & Administrative Support';
-      } else {
-        dirAr = 'دائرة تكنولوجيا المعلومات والاتصالات';
-        dirEn = 'Directorate of Information Technology';
       }
     }
 

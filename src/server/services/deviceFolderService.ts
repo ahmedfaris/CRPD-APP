@@ -134,68 +134,6 @@ export async function generateNextDeviceCode(
 }
 
 /**
- * Ensures standard Organization -> Directorate -> Department -> Division hierarchy exists in DB
- */
-export async function ensureOrgHierarchySeeded(): Promise<void> {
-  try {
-    const allUnits = await db.select().from(departments);
-    const hasOrg = allUnits.some(u => {
-      try {
-        if (u.description && u.description.includes('"orgType":"org"')) return true;
-      } catch (_) {}
-      return false;
-    });
-
-    if (!hasOrg) {
-      console.log('⚡ Initializing full organizational hierarchy in DB...');
-      
-      const [rootOrg] = await db.insert(departments).values({
-        name: 'General Telecommunications & Informatics Authority',
-        description: JSON.stringify({
-          nameAr: 'الهيئة العامة للاتصالات والمعلوماتية',
-          orgType: 'org',
-          description: 'الهيئة المركزية للاتصالات وتقنية المعلومات والتحول الرقمي للأصول والمؤسسات.'
-        }),
-        parentId: null,
-        managerId: 'admin_uid_seed'
-      }).returning();
-
-      const [dirIT] = await db.insert(departments).values({
-        name: 'Directorate of Information Technology & Cybersecurity',
-        description: JSON.stringify({
-          nameAr: 'دائرة تكنولوجيا المعلومات والأمن السيبراني',
-          orgType: 'directorate',
-          description: 'الإشراف على البنية التحتية للحوسبة والشبكات وأمن المعلومات وإدارة الأجهزة الإلكترونية.'
-        }),
-        parentId: rootOrg.id,
-        managerId: 'admin_uid_seed'
-      }).returning();
-
-      const [dirOps] = await db.insert(departments).values({
-        name: 'Directorate of Operations & Administrative Support',
-        description: JSON.stringify({
-          nameAr: 'دائرة العمليات والخدمات المساندة',
-          orgType: 'directorate',
-          description: 'إدارة العمليات الميدانية والخدمات اللوجستية والموارد البشرية ودعم العملاء.'
-        }),
-        parentId: rootOrg.id,
-        managerId: 'admin_uid_seed'
-      }).returning();
-
-      for (const unit of allUnits) {
-        let parentToAssign = dirOps.id;
-        if (unit.name === 'Information Technology' || unit.name.includes('Technology') || unit.name.includes('Archiving')) {
-          parentToAssign = dirIT.id;
-        }
-        await db.update(departments).set({ parentId: parentToAssign }).where(eq(departments.id, unit.id));
-      }
-    }
-  } catch (err) {
-    console.error('Error in ensureOrgHierarchySeeded:', err);
-  }
-}
-
-/**
  * Ensures root storage directory "asset archive" exists
  */
 export function ensureStorageRootExists(): string {
@@ -221,12 +159,14 @@ export async function resolveOrgHierarchyForDepartment(
 ): Promise<DeviceFolderHierarchy> {
   const normInput = (deptInput || '').trim().toLowerCase();
   
-  let orgName = explicitOrg || 'الهيئة العامة للاتصالات والمعلوماتية';
-  let orgNameEn = 'General Telecommunications & Informatics Authority';
-  let dirName = explicitDir || 'دائرة تكنولوجيا المعلومات والأمن السيبراني';
-  let dirNameEn = 'Directorate of Information Technology & Cybersecurity';
-  let deptName = deptInput || 'تكنولوجيا المعلومات';
-  let deptNameEn = 'Information Technology';
+  // Names come only from the organizational structure. When a level is missing the folder
+  // builder uses a neutral placeholder; no example organization or directorate is invented.
+  let orgName = explicitOrg || '';
+  let orgNameEn = '';
+  let dirName = explicitDir || '';
+  let dirNameEn = '';
+  let deptName = deptInput || '';
+  let deptNameEn = deptInput || '';
   let divName = divisionInput || '';
   let divNameEn = '';
 
@@ -252,12 +192,15 @@ export async function resolveOrgHierarchyForDepartment(
     const unitMap = new Map<number, typeof parsedUnits[0]>();
     parsedUnits.forEach(u => unitMap.set(u.id, u));
 
-    const matched = parsedUnits.find(u => 
-      u.name.toLowerCase() === normInput || 
-      u.nameAr.toLowerCase() === normInput ||
-      u.name.toLowerCase().includes(normInput) ||
-      normInput.includes(u.name.toLowerCase()) ||
-      normInput.includes(u.nameAr.toLowerCase())
+    // Exact match first, then partial; empty names never match ('x'.includes('') is true).
+    const en = (u: any) => (u.name || '').trim().toLowerCase();
+    const ar = (u: any) => (u.nameAr || '').trim().toLowerCase();
+    const matched = !normInput ? undefined : (
+      parsedUnits.find(u => en(u) === normInput || ar(u) === normInput) ||
+      parsedUnits.find(u =>
+        (!!en(u) && (en(u).includes(normInput) || normInput.includes(en(u)))) ||
+        (!!ar(u) && (ar(u).includes(normInput) || normInput.includes(ar(u))))
+      )
     );
 
     if (matched) {
@@ -289,31 +232,25 @@ export async function resolveOrgHierarchyForDepartment(
             dirName = parentDir.nameAr || parentDir.name;
             dirNameEn = parentDir.name;
           }
-        } else {
-          // Contextual directorate fallback
-          if (deptName.includes('عمليات') || deptName.includes('موارد') || deptName.includes('دعم') || deptNameEn.toLowerCase().includes('operations') || deptNameEn.toLowerCase().includes('human')) {
-            dirName = 'دائرة العمليات والخدمات المساندة';
-            dirNameEn = 'Directorate of Operations & Administrative Support';
-          } else {
-            dirName = 'دائرة تكنولوجيا المعلومات والأمن السيبراني';
-            dirNameEn = 'Directorate of Information Technology & Cybersecurity';
-          }
         }
       } else if (matched.orgType === 'directorate') {
         dirName = matched.nameAr || matched.name;
         dirNameEn = matched.name;
       }
-    } else {
-      if (normInput.includes('operat') || normInput.includes('عمليات') || normInput.includes('resource') || normInput.includes('موارد')) {
-        dirName = 'دائرة العمليات والخدمات المساندة';
-        dirNameEn = 'Directorate of Operations & Administrative Support';
-        deptName = deptInput || 'العمليات والتنفيذ';
-        deptNameEn = deptInput || 'Operations';
-      } else {
-        dirName = 'دائرة تكنولوجيا المعلومات والأمن السيبراني';
-        dirNameEn = 'Directorate of Information Technology & Cybersecurity';
-        deptName = deptInput || 'تكنولوجيا المعلومات';
-        deptNameEn = deptInput || 'Information Technology';
+    }
+
+    // Organization: the nearest 'org' ancestor of the matched unit.
+    if (matched && !explicitOrg) {
+      let cursor: any = matched;
+      const seen = new Set<number>();
+      while (cursor && !seen.has(cursor.id)) {
+        seen.add(cursor.id);
+        if (cursor.orgType === 'org') {
+          orgName = cursor.nameAr || cursor.name;
+          orgNameEn = cursor.name;
+          break;
+        }
+        cursor = cursor.parentId ? unitMap.get(cursor.parentId) : undefined;
       }
     }
   } catch (err) {

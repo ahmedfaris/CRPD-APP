@@ -122,7 +122,7 @@ export function HardwareAssetSelector({
   // Determine user capabilities & department
   const isTech = Boolean(isTechnicalUser || isAdmin);
   const enforceStrictDept = Boolean(strictUserDepartmentOnly && !isTech);
-  const userDept = currentUser?.department || 'Operations';
+  const userDept = currentUser?.department || '';
 
   // Search & Filtering State
   const [searchQuery, setSearchQuery] = useState('');
@@ -158,19 +158,11 @@ export function HardwareAssetSelector({
   const userDeptDisplay = language === 'ar' ? (userOrgDept?.nameAr || userDept) : (userOrgDept?.nameEn || userDept);
 
   const resolvedQuickHierarchy = useMemo(() => {
-    return resolveHierarchyForDept(quickDepartment || userDept || 'Information Technology', quickDivision);
+    return resolveHierarchyForDept(quickDepartment || userDept || '', quickDivision);
   }, [quickDepartment, userDept, quickDivision, resolveHierarchyForDept]);
   const departmentsList = useMemo(() => {
-    if (orgDepts && orgDepts.length > 0) {
-      return orgDepts.map(d => language === 'ar' ? (d.nameAr || d.nameEn) : d.nameEn);
-    }
-    return [
-      language === 'ar' ? 'تكنولوجيا المعلومات' : 'Information Technology',
-      language === 'ar' ? 'العمليات والتنفيذ' : 'Operations',
-      language === 'ar' ? 'الأرشفة الإلكترونية والسجلات' : 'Electronic Archiving & Records',
-      language === 'ar' ? 'دعم العملاء ومكتب المساعدة' : 'Customer Support & Helpdesk',
-      language === 'ar' ? 'الموارد البشرية' : 'Human Resources'
-    ];
+    // Departments come only from the organizational structure (no built-in examples).
+    return (orgDepts || []).map(d => language === 'ar' ? (d.nameAr || d.nameEn) : d.nameEn);
   }, [orgDepts, language]);
 
   const [selectedDeptFilter, setSelectedDeptFilter] = useState<string>('ALL');
