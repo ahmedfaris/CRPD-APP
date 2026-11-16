@@ -363,35 +363,6 @@ export interface ApplicationUser {
   rolePermissions?: string[];
 }
 
-export type DocumentClassification = 'Top Secret' | 'Confidential' | 'Restricted' | 'Public';
-export type DocumentCategory = 
-  | 'Contracts & Agreements'
-  | 'Administrative Decisions'
-  | 'Financial & Auditing'
-  | 'Security & Compliance'
-  | 'Technical Specs & Blueprints';
-
-export interface ArchivedDocument {
-  id: string;
-  titleEn: string;
-  titleAr: string;
-  docNumber: string;
-  category: DocumentCategory;
-  classification: DocumentClassification;
-  department: string;
-  archivedDate: string;
-  retentionYears: number;
-  retentionExpiry: string;
-  fileSize: string;
-  fileFormat: 'PDF' | 'DOCX' | 'XLSX' | 'SCAN';
-  sha256Hash: string;
-  archivedBy: string;
-  barcodeNumber: string;
-  physicalLocation: string;
-  status: 'Active' | 'Under Review' | 'Permanent Archive';
-  tags: string[];
-}
-
 export interface EmployeeRecord {
   id: string;
   empNumber: string;

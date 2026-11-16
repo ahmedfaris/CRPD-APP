@@ -7,7 +7,7 @@ import { ThemeProvider } from './context/ThemeContext';
 import { LoginView } from './components/LoginView';
 import { MetroNavbar } from './components/MetroNavbar';
 import { MetroDashboard } from './components/MetroDashboard';
-import { ArchivingApp } from './components/ArchivingApp';
+import { LasApp } from './components/las/LasApp';
 import { EmployeeManagementApp } from './components/EmployeeManagementApp';
 import { Navbar } from './components/Navbar';
 import { TicketList } from './components/TicketList';
@@ -150,7 +150,7 @@ function AppContent() {
           onSelectTicket={handleSelectTicketFromNav}
         />
         <main className="flex-1">
-          <ArchivingApp onBackToMetro={() => setCurrentApp('metro')} />
+          <LasApp onBackToMetro={() => setCurrentApp('metro')} />
         </main>
       </div>
     );
