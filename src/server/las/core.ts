@@ -174,7 +174,7 @@ export function actingFor(ctx: Ctx, unitId: number, pick: (r: RoleRow) => boolea
 }
 
 export interface AccessRow {
-  unit_id: number; confidentiality: string; created_by_uid: string; archived_by_uid: string | null;
+  unit_id: number; confidentiality: string; created_by_uid: string; archived_by_uid: string | null; source?: string | null;
   named_user_uids: string[] | null; ref_uids: string[] | null; ref_units: number[] | null;
   appr_units: number[] | null; mut_units: number[] | null;
 }
@@ -195,8 +195,10 @@ export const ACCESS_COLS = `
  *  - A system administrator without a business role sees Normal records only.
  */
 export function canView(ctx: Ctx, l: AccessRow): boolean {
-  const named = (l.named_user_uids || []).includes(ctx.uid) || l.created_by_uid === ctx.uid
-    || l.archived_by_uid === ctx.uid || (l.ref_uids || []).includes(ctx.uid);
+  // An internal copy is registered by the system for the receiving unit: the sender's approver is
+  // stamped as its registrar but does not own it, so that does not make the copy visible to them.
+  const owner = l.source !== 'internal copy' && (l.created_by_uid === ctx.uid || l.archived_by_uid === ctx.uid);
+  const named = owner || (l.named_user_uids || []).includes(ctx.uid) || (l.ref_uids || []).includes(ctx.uid);
   if (named) return true;
   const exact = exactHeadUnits(ctx);
   if ((l.appr_units || []).some(u => exact.has(u)) || (l.mut_units || []).some(u => exact.has(u))) return true;
@@ -219,7 +221,7 @@ export function accessPrefilter(ctx: Ctx, params: any[]): string {
   params.push(view); const pv = params.length;
   params.push(ctx.uid); const pu = params.length;
   params.push(exact); const pe = params.length;
-  return `(l.unit_id = ANY($${pv}::int[]) OR l.created_by_uid = $${pu} OR l.archived_by_uid = $${pu}
+  return `(l.unit_id = ANY($${pv}::int[]) OR (l.source <> 'internal copy' AND (l.created_by_uid = $${pu} OR l.archived_by_uid = $${pu}))
     OR l.named_user_uids ? $${pu}
     OR l.id IN (SELECT letter_id FROM las_referrals WHERE status <> 'Recalled' AND (to_uid = $${pu} OR to_unit_id = ANY($${pv}::int[])))
     OR l.id IN (SELECT letter_id FROM las_approvals WHERE approver_unit_id = ANY($${pe}::int[]))
@@ -419,7 +421,7 @@ export async function issueNumber(ctx: Ctx, letterId: number, seqType: 'IN' | 'O
 // Folder structure and file storage (section 2.4). Files live outside the web root and are
 // served only through permission checks.
 // ---------------------------------------------------------------------------------------
-export const ARCHIVE_ROOT = path.join(process.cwd(), 'letters archive');
+export const ARCHIVE_ROOT = path.resolve(process.env.LAS_ARCHIVE_ROOT || path.join(process.cwd(), 'letters archive'));
 const AR_MONTHS = ['كانون_الثاني', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران', 'تموز', 'آب', 'أيلول', 'تشرين_الأول', 'تشرين_الثاني', 'كانون_الأول'];
 const HEAD_OFFICE_NAMES: Record<UnitType, string> = { org: 'مكتب_رئيس_المؤسسة', directorate: 'مكتب_المدير', department: 'مكتب_رئيس_القسم', division: 'مكتب_مسؤول_الشعبة' };
 export const TYPE_FOLDERS: Record<string, string> = { letter: '01_الكتب_الرسمية', mutalaa: '02_المطالعات', report: '03_التقارير' };
@@ -474,6 +476,7 @@ const FILE_TYPES: Array<{ ext: string; mime: string; magic: (b: Buffer) => boole
   { ext: 'docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', magic: b => b[0] === 0x50 && b[1] === 0x4b },
   { ext: 'xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', magic: b => b[0] === 0x50 && b[1] === 0x4b },
   { ext: 'doc', mime: 'application/msword', magic: b => b.subarray(0, 4).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0])) },
+  { ext: 'tif', mime: 'image/tiff', magic: b => b.subarray(0, 4).equals(Buffer.from([0x49, 0x49, 0x2a, 0x00])) || b.subarray(0, 4).equals(Buffer.from([0x4d, 0x4d, 0x00, 0x2a])) },
 ];
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
@@ -485,6 +488,14 @@ export async function saveAttachment(ctx: Ctx, letter: any, file: { name?: strin
   const m = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(String(file?.dataUrl || ''));
   if (!m || !m[2]) throw new Error('FILE_INVALID');
   const buf = Buffer.from(m[3], 'base64');
+  return saveAttachmentBuffer(ctx, letter, buf, { name: file.name, isOriginalScan: file.isOriginalScan, kind: file.kind }, reportKind, version);
+}
+
+/** Called after an original scan is stored, so it can be converted to searchable PDF/A (set by the capture module). */
+export const attachmentHooks: { afterOriginalScan: ((attachment: any, letter: any) => Promise<void>) | null } = { afterOriginalScan: null };
+
+export interface SaveOpts { name?: string; isOriginalScan?: boolean; kind?: string; ocrText?: string | null; pdfaConformance?: string | null; skipConversion?: boolean }
+export async function saveAttachmentBuffer(ctx: Pick<Ctx, 'uid' | 'units' | 'kids'>, letter: any, buf: Buffer, file: SaveOpts, reportKind?: string, version = 1) {
   if (buf.length === 0) throw new Error('FILE_EMPTY');
   if (buf.length > MAX_FILE_BYTES) throw new Error('FILE_TOO_LARGE');
   const wantedExt = String(file.name || '').toLowerCase().split('.').pop() || '';
@@ -492,7 +503,7 @@ export async function saveAttachment(ctx: Ctx, letter: any, file: { name?: strin
     || FILE_TYPES.find(t => t.magic(buf));
   if (!type) throw new Error('FILE_TYPE_NOT_ALLOWED');
 
-  const folder = recordFolder(ctx, letter, reportKind);
+  const folder = recordFolder(ctx as Ctx, letter, reportKind);
   const rec = folder.split('/').pop()!;
   const count = await q1<any>('SELECT count(*)::int AS n FROM las_attachments WHERE letter_id = $1 AND is_original_scan = $2', [letter.id, !!file.isOriginalScan]);
   const n = (count?.n || 0) + 1;
@@ -504,9 +515,16 @@ export async function saveAttachment(ctx: Ctx, letter: any, file: { name?: strin
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   fs.writeFileSync(abs, buf, { flag: 'wx' });
   const row = await q1<any>(
-    `INSERT INTO las_attachments (letter_id, file_name, original_name, mime, size, storage_path, sha256, is_original_scan, kind, version, uploaded_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-    [letter.id, fileName, String(file.name || fileName).slice(0, 200), type.mime, buf.length, rel, sha256(buf), !!file.isOriginalScan, file.kind || 'attachment', version, ctx.uid]);
+    `INSERT INTO las_attachments (letter_id, file_name, original_name, mime, size, storage_path, sha256, is_original_scan, kind, version, uploaded_by, ocr_text, pdfa_conformance, ocr_status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+    [letter.id, fileName, String(file.name || fileName).slice(0, 200), type.mime, buf.length, rel, sha256(buf), !!file.isOriginalScan, file.kind || 'attachment', version, ctx.uid,
+      file.ocrText ?? null, file.pdfaConformance ?? null, file.pdfaConformance ? 'done' : null]);
+  // Scans and images are converted to searchable PDF/A in the background.
+  if (!file.skipConversion && !file.pdfaConformance && ['pdf', 'png', 'jpg', 'tif'].includes(type.ext) && (file.isOriginalScan || file.kind === 'attachment') && attachmentHooks.afterOriginalScan) {
+    await q(`UPDATE las_attachments SET ocr_status = 'queued' WHERE id = $1`, [row.id]);
+    row.ocr_status = 'queued';
+    await attachmentHooks.afterOriginalScan(row, letter);
+  }
   return row;
 }
 

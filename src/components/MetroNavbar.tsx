@@ -46,7 +46,8 @@ export function MetroNavbar({ currentApp, onSelectApp, onSelectTicket }: MetroNa
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white select-none shadow-sm" dir={dir}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      {/* Wraps onto a second line on narrow screens / high zoom instead of scrolling sideways (WCAG 1.4.10). */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 min-h-16 py-2 sm:py-0 flex flex-wrap items-center justify-between gap-2">
         
         {/* Left: Organization Branding & App Selector */}
         <div className="flex items-center space-x-4">
@@ -104,7 +105,7 @@ export function MetroNavbar({ currentApp, onSelectApp, onSelectTicket }: MetroNa
         </div>
 
         {/* Right Controls: Quick App Jump, Language Toggle, and Profile Dropdown */}
-        <div className="flex items-center space-x-2.5 sm:space-x-3">
+        <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
           
           {/* Quick Apps Switcher Buttons if inside an app */}
           {currentApp !== 'metro' && (

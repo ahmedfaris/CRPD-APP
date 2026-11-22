@@ -31,8 +31,8 @@ class Database {
     });
     this.users.push({
       id: 'usr_ahmed',
-      userName: 'ahmed.faris',
-      email: 'ahmed.faris89@gmail.com',
+      userName: 'staff',
+      email: 'staff@example.local',
       emailConfirmed: true,
       fullName: 'Ahmed Faris',
       department: 'Operations',

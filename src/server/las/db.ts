@@ -158,6 +158,71 @@ CREATE TABLE IF NOT EXISTS las_attachments (
   uploaded_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_las_att_letter ON las_attachments(letter_id);
+-- OCR text (searchable, also shown as an accessible text view) and PDF/A result
+ALTER TABLE las_attachments ADD COLUMN IF NOT EXISTS ocr_text TEXT;
+ALTER TABLE las_attachments ADD COLUMN IF NOT EXISTS ocr_status TEXT;
+ALTER TABLE las_attachments ADD COLUMN IF NOT EXISTS pdfa_conformance TEXT;
+ALTER TABLE las_attachments ADD COLUMN IF NOT EXISTS source_attachment_id INTEGER;
+
+-- Capture: scanned batches (hot folder, scanning agent, browser upload) and the documents split from them
+CREATE TABLE IF NOT EXISTS las_capture_batches (
+  id SERIAL PRIMARY KEY,
+  kind TEXT NOT NULL DEFAULT 'capture',
+  source TEXT NOT NULL,
+  source_name TEXT,
+  unit_id INTEGER,
+  separation TEXT NOT NULL DEFAULT 'barcode',
+  status TEXT NOT NULL DEFAULT 'receiving',
+  files JSONB NOT NULL DEFAULT '[]'::jsonb,
+  pages INTEGER,
+  attachment_id INTEGER,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  log JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  started_at TIMESTAMPTZ,
+  finished_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_las_cap_batch_status ON las_capture_batches(status);
+
+CREATE TABLE IF NOT EXISTS las_capture_docs (
+  id SERIAL PRIMARY KEY,
+  batch_id INTEGER NOT NULL,
+  seq INTEGER NOT NULL,
+  unit_id INTEGER,
+  page_from INTEGER NOT NULL,
+  page_to INTEGER NOT NULL,
+  pages INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ready',
+  meta JSONB NOT NULL DEFAULT '{}'::jsonb,
+  barcodes JSONB NOT NULL DEFAULT '[]'::jsonb,
+  attach_to_number TEXT,
+  ocr_text TEXT,
+  ocr_chars INTEGER,
+  pdfa_path TEXT,
+  pdfa_conformance TEXT,
+  sha256 TEXT,
+  size INTEGER,
+  filed_letter_id INTEGER,
+  filed_by TEXT,
+  filed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_las_cap_doc_status ON las_capture_docs(status, unit_id);
+
+-- One-time tickets that let the scanning agent upload a batch for a signed-in user
+CREATE TABLE IF NOT EXISTS las_capture_tickets (
+  id SERIAL PRIMARY KEY,
+  token_hash TEXT NOT NULL UNIQUE,
+  user_uid TEXT NOT NULL,
+  unit_id INTEGER NOT NULL,
+  separation TEXT NOT NULL DEFAULT 'barcode',
+  batch_id INTEGER,
+  expires_at TIMESTAMPTZ NOT NULL,
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 CREATE TABLE IF NOT EXISTS las_referrals (
   id SERIAL PRIMARY KEY,

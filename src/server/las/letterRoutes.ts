@@ -11,6 +11,7 @@ import {
   h, bad, forbidden, notFound, HttpError, str, day, int, oneOf, idList, uidList, paramId, camel,
   LETTER_SELECT, loadLetter, READ_ONLY_STATUSES, URGENCIES, CONFIDENTIALITIES, isConfidential,
 } from './http.ts';
+import { fileCapturedDoc } from './capture/routes.ts';
 
 const router = Router();
 
@@ -83,6 +84,14 @@ router.post('/letters/incoming', h(async (ctx, req, res) => {
   const received = day(b.receivedDate, 'Date received') || baghdadToday();
   const confidentiality = oneOf(b.confidentiality, 'Confidentiality', CONFIDENTIALITIES, 'Normal');
   const categoryId = int(b.categoryId, 'Category');
+  // Registering a scanned document from the capture queue: check it before anything is created.
+  let captureDoc: any = null;
+  if (b.captureDocId) {
+    captureDoc = await q1<any>('SELECT id, unit_id, status FROM las_capture_docs WHERE id = $1', [int(b.captureDocId, 'Scanned document', true)]);
+    if (!captureDoc) throw notFound('Scanned document');
+    if (!(captureDoc.unit_id && registryUnits(ctx).has(captureDoc.unit_id))) throw forbidden('This scanned document belongs to another registry desk.');
+    if (captureDoc.status !== 'ready') throw bad('This scanned document was already filed or discarded.');
+  }
 
   // FR-1.5: warn about a possible duplicate (same sender + sender reference number)
   if (externalRefNo && !b.confirmDuplicate) {
@@ -111,6 +120,8 @@ router.post('/letters/incoming', h(async (ctx, req, res) => {
     await q(`UPDATE las_letters SET status = 'Cancelled' WHERE id = $1`, [row.id]); // the number stays used, as the rules require
     throw e;
   }
+  // Registered from the capture queue: the scanned, OCR'd PDF/A becomes the original scan (no re-upload).
+  if (captureDoc) await fileCapturedDoc(ctx, captureDoc.id, letter, true);
   await saveFiles(ctx, letter, b.files);
   if (confidentiality === 'Normal') {
     await notify(await usersWithRoleAt(unit.id, HEAD_ROLES), row.id, 'incoming', `كتاب وارد جديد ${number}`, `New incoming letter ${number}`);
@@ -469,6 +480,17 @@ router.post('/letters/:id/print', h(async (ctx, req, res) => {
   res.json({ success: true });
 }));
 
+// AR-10: the OCR text of a scan, as an accessible text view for screen-reader users
+router.get('/attachments/:id/text', h(async (ctx, req, res) => {
+  const a = await q1<any>('SELECT id, letter_id, file_name, ocr_text, ocr_status FROM las_attachments WHERE id = $1 AND deleted_at IS NULL', [paramId(req.params.id)]);
+  if (!a) throw notFound('Attachment');
+  const viaId = req.query.letter ? paramId(req.query.letter) : a.letter_id;
+  const via = await loadLetter(ctx, viaId);
+  if (via.id !== a.letter_id && via.source_letter_id !== a.letter_id) throw forbidden('This file does not belong to that record.');
+  if (isConfidential(via)) await audit(ctx, 'ViewText', 'Letter', via.id, via.number, { attachmentId: a.id }, { failClosed: true });
+  res.json({ success: true, data: { fileName: a.file_name, status: a.ocr_status, text: a.ocr_text || '' } });
+}));
+
 router.post('/letters/:id/links', h(async (ctx, req, res) => {
   const l = await loadLetter(ctx, paramId(req.params.id));
   const other = await loadLetter(ctx, int(req.body?.relatedLetterId, 'Related record', true)!);
@@ -733,7 +755,9 @@ router.get('/letters/:id', h(async (ctx, req, res) => {
   if (isConfidential(l)) await audit(ctx, 'View', 'Letter', l.id, l.number, { confidentiality: l.confidentiality }, { failClosed: true });
   const filesOf = l.source_letter_id || l.id;
   const [attachments, referrals, approvals, links, deliveries, contact, category, mut, opinions, rep, versions, kase] = await Promise.all([
-    q<any>('SELECT id, letter_id, file_name, original_name, mime, size, sha256, is_original_scan, kind, version, uploaded_by, uploaded_at FROM las_attachments WHERE letter_id = $1 AND deleted_at IS NULL ORDER BY id', [filesOf]),
+    q<any>(`SELECT id, letter_id, file_name, original_name, mime, size, sha256, is_original_scan, kind, version, uploaded_by, uploaded_at,
+              ocr_status, pdfa_conformance, source_attachment_id, (ocr_text IS NOT NULL AND ocr_text <> '') AS has_ocr
+              FROM las_attachments WHERE letter_id = $1 AND deleted_at IS NULL ORDER BY id`, [filesOf]),
     q<any>('SELECT r.*, r.due_date::text AS due_date FROM las_referrals r WHERE letter_id = $1 ORDER BY id', [l.id]),
     q<any>('SELECT * FROM las_approvals WHERE letter_id = $1 ORDER BY round, step_no', [l.id]),
     q<any>(`SELECT k.relation, k.letter_id, k.related_letter_id, o.id AS other_id, o.number AS other_number, o.subject AS other_subject, o.status AS other_status
@@ -810,15 +834,18 @@ router.get('/letters', h(async (ctx, req, res) => {
   if (p.reportKind) add('l.id IN (SELECT letter_id FROM las_report_details WHERE report_kind = ?)', oneOf(p.reportKind, 'Report kind', REPORT_KINDS));
   if (p.overdue === '1') { params.push(baghdadToday()); where.push(`l.due_date < $${params.length}::date AND l.status IN ('Registered','Referred','In progress')`); }
   if (p.number) add('l.number = ?', str(p.number, 'Number', 80));
-  const text = str(p.q, 'Search text', 200);
+  // A scanned record label (QR "LAS1|REC|<number>") searches for that number.
+  const text = str(p.q, 'Search text', 200)?.replace(/^LAS1\|REC\|/, '') || null;
   if (text) {
-    // Arabic-aware (أ/إ/آ, ة/ه, ى/ي) search in number, subject, summary, text, sender and keywords.
+    // Arabic-aware (أ/إ/آ, ة/ه, ى/ي) search in number, subject, summary, text, sender, keywords
+    // and the OCR text of scanned files (an internal copy searches its sender's files).
     params.push(`%${text}%`);
     const n = `$${params.length}`;
     where.push(`(l.number ILIKE ${n} OR l.external_ref_no ILIKE ${n} OR las_norm(l.subject) LIKE las_norm(${n}) OR las_norm(l.summary) LIKE las_norm(${n}) OR las_norm(l.body) LIKE las_norm(${n})
       OR l.contact_id IN (SELECT id FROM las_contacts WHERE las_norm(name) LIKE las_norm(${n}))
       OR l.id IN (SELECT letter_id FROM las_report_details WHERE las_norm(keywords) LIKE las_norm(${n}))
-      OR l.id IN (SELECT letter_id FROM las_mutalaa_details WHERE las_norm(recommendation) LIKE las_norm(${n}) OR las_norm(background) LIKE las_norm(${n})))`);
+      OR l.id IN (SELECT letter_id FROM las_mutalaa_details WHERE las_norm(recommendation) LIKE las_norm(${n}) OR las_norm(background) LIKE las_norm(${n}))
+      OR coalesce(l.source_letter_id, l.id) IN (SELECT letter_id FROM las_attachments WHERE deleted_at IS NULL AND las_norm(ocr_text) LIKE las_norm(${n})))`);
   }
   const limit = Math.min(int(p.limit, 'Limit') || 100, 500);
   const rows = await q<any>(

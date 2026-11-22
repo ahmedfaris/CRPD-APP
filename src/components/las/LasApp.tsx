@@ -1,14 +1,15 @@
 // Letters Archive System — application shell: navigation, keyboard shortcuts, language,
 // accessibility preferences (font size, high contrast, digits) and the shared data context.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Inbox, FileInput, FileOutput, ScrollText, FileBarChart, Search, BarChart3, Settings, ShieldCheck, ArrowRight, Accessibility } from 'lucide-react';
+import { Inbox, FileInput, FileOutput, ScrollText, FileBarChart, Search, BarChart3, Settings, ShieldCheck, ArrowRight, Accessibility, ScanLine } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { LasContext, LasState, Me, Unit, las, Notice, Btn, Modal, Field, inputCls } from './ui';
 import { IncomingForm, OutgoingForm, MutalaaForm, ReportForm } from './Forms';
 import { LetterDetail } from './LetterDetail';
 import { InboxView, ArchiveView, StatsView, AdminView, AuditView } from './Views';
+import { CaptureView } from './CaptureView';
 
-type View = 'inbox' | 'incoming' | 'outgoing' | 'mutalaa' | 'report' | 'archive' | 'stats' | 'admin' | 'audit';
+type View = 'inbox' | 'capture' | 'incoming' | 'outgoing' | 'mutalaa' | 'report' | 'archive' | 'stats' | 'admin' | 'audit';
 interface Prefs { fontScale: number; highContrast: boolean; westernDigits: boolean }
 const PREFS_KEY = 'las_prefs_v1';
 const readPrefs = (): Prefs => {
@@ -64,7 +65,8 @@ export function LasApp({ onBackToMetro }: { onBackToMetro: () => void }) {
     return () => { root.style.fontSize = before; };
   }, [prefs]);
 
-  const go = useCallback((v: View) => { setView(v); setFlash(''); requestAnimationFrame(() => mainRef.current?.focus()); }, []);
+  // Moving to a section puts focus on its heading area; the search shortcut puts it in the search box instead.
+  const go = useCallback((v: View, focusMain = true) => { setView(v); setFlash(''); if (focusMain) requestAnimationFrame(() => mainRef.current?.focus()); }, []);
   // Keyboard shortcuts (AR-1): Alt+I inbox, Alt+N new incoming, Alt+O new outgoing, Alt+S search.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -73,7 +75,7 @@ export function LasApp({ onBackToMetro }: { onBackToMetro: () => void }) {
       if (k === 'i') { e.preventDefault(); go('inbox'); }
       if (k === 'n') { e.preventDefault(); go('incoming'); }
       if (k === 'o') { e.preventDefault(); go('outgoing'); }
-      if (k === 's') { e.preventDefault(); go('archive'); setFocusSearch(x => x + 1); }
+      if (k === 's') { e.preventDefault(); go('archive', false); setFocusSearch(x => x + 1); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -106,6 +108,7 @@ export function LasApp({ onBackToMetro }: { onBackToMetro: () => void }) {
   const noRole = me.roles.length === 0 && !me.isSysAdmin;
   const nav: Array<{ id: View; label: string; icon: any; show: boolean; key?: string }> = [
     { id: 'inbox', label: tr('بريدي', 'My inbox'), icon: Inbox, show: true, key: 'Alt+I' },
+    { id: 'capture', label: tr('المسح الضوئي والفهرسة', 'Scanning and indexing'), icon: ScanLine, show: me.registryUnits.length > 0 || me.isSysAdmin },
     { id: 'incoming', label: tr('تسجيل وارد', 'Register incoming'), icon: FileInput, show: me.registryUnits.length > 0, key: 'Alt+N' },
     { id: 'outgoing', label: tr('كتاب صادر', 'New outgoing'), icon: FileOutput, show: me.memberUnits.length + me.registryUnits.length > 0, key: 'Alt+O' },
     { id: 'mutalaa', label: tr('مطالعة', "Mutala'a"), icon: ScrollText, show: me.memberUnits.length + me.registryUnits.length > 0 },
@@ -149,12 +152,14 @@ export function LasApp({ onBackToMetro }: { onBackToMetro: () => void }) {
             </ul>
           </nav>
         </header>
-        <main id="las-main" ref={mainRef} tabIndex={-1} className="max-w-7xl mx-auto px-4 py-5 space-y-4 focus:outline-none">
-          <h2 className="text-lg font-bold">{titles[view]}</h2>
+        {/* The portal shell already provides the page's <main>; this is a labelled region inside it. */}
+        <section id="las-main" ref={mainRef} tabIndex={-1} aria-labelledby="las-view-title" className="max-w-7xl mx-auto px-4 py-5 space-y-4 focus:outline-none">
+          <h2 id="las-view-title" className="text-lg font-bold">{titles[view]}</h2>
           {noRole && <Notice kind="warn">{tr('لم تُمنح صلاحية في الأرشيف بعد. يمكنك رؤية ما يُحال إليك فقط. راجع مدير النظام لإضافتك إلى وحدتك.', 'You have no archive role yet, so you only see what is referred to you. Ask the administrator to add you to your unit.')}</Notice>}
           {state.units.length === 0 && <Notice kind="warn">{tr('لا يوجد هيكل تنظيمي بعد. أضف المؤسسة والدوائر والأقسام من تطبيق «الهيكل التنظيمي» أولاً.', 'There is no organizational structure yet. Add the institution, directorates and departments in the Organizational Structure app first.')}</Notice>}
           {flash && <Notice kind="success" onClose={() => setFlash('')}>{flash}</Notice>}
           {view === 'inbox' && <InboxView refreshKey={refreshKey} />}
+          {view === 'capture' && <CaptureView onRegistered={(id, m) => { setFlash(m); setRefreshKey(k => k + 1); setOpenId(id); }} />}
           {view === 'incoming' && <IncomingForm onDone={done} />}
           {view === 'outgoing' && <OutgoingForm onDone={done} />}
           {view === 'mutalaa' && <MutalaaForm onDone={done} />}
@@ -163,7 +168,7 @@ export function LasApp({ onBackToMetro }: { onBackToMetro: () => void }) {
           {view === 'stats' && <StatsView />}
           {view === 'admin' && <AdminView />}
           {view === 'audit' && <AuditView />}
-        </main>
+        </section>
         {/* Screen-reader announcements for results of actions (AR-2) */}
         <div aria-live="polite" role="status" className="sr-only">{live}</div>
         {openId !== null && <LetterDetail key={openId} id={openId} onClose={() => setOpenId(null)} onChanged={() => setRefreshKey(k => k + 1)} />}

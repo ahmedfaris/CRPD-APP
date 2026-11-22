@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- CRPD Archive scanning agent: TWAIN batch scanning for the registry desk PCs (Windows only). -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>CrpdScanAgent</AssemblyName>
+    <RootNamespace>CrpdScanAgent</RootNamespace>
+    <Version>1.0.0</Version>
+    <!-- Most TWAIN drivers are still 32-bit: build x86 so the agent can load them. -->
+    <PlatformTarget>x86</PlatformTarget>
+    <RuntimeIdentifier>win-x86</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <!-- Allows building on Linux/macOS (CI); the agent itself runs on Windows. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Windows Forms for the tray icon and the TWAIN message loop (referenced directly so the
+         project also builds where only the base .NET SDK is installed). -->
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+    <PackageReference Include="NTwain" Version="3.7.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="agentsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

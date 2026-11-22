@@ -222,6 +222,7 @@ await L('PUT', '/settings', 'admin', { prefixes: { IN: 'IN', OUT: 'OUT', MEMO: '
 
 console.log('\n=== dashboard and reports (4.7) ===');
 const dash = (await L('GET', '/stats/dashboard', 'dir1')).d.data;
+check("director cannot open the other directorate's incoming copy of a letter they approved", !(await sees('dir1', d2copy.inLetterId)));
 check('dashboard counts by unit for the director scope', dash.totals.incoming >= 19 && dash.byUnit.some(u => u.unitCode === 'D1-01') && !dash.byUnit.some(u => u.unitCode === 'D2'), dash.totals);
 const reg = (await L('GET', `/stats/register?direction=IN&date=${me.today}&unitId=${D101}`, 'clerk')).d.data;
 check('daily incoming register lists today\'s letters; confidential subjects hidden', reg.rows.length >= 19 && reg.rows.find(r => r.confidentiality === 'Confidential').subject === '—', reg.rows.length);
@@ -240,7 +241,7 @@ check('audit never contains letter text or passwords', !leak.includes('نص ال
 const ver = (await L('GET', '/audit/verify', 'admin')).d.data;
 check('hash chain verifies', ver.ok === true && ver.rows === au.length || ver.ok === true, ver);
 const audScoped = (await L('GET', '/audit?limit=1000', 'viewer')).d.data;
-check('auditor reads only their scope', audScoped.length > 0 && audScoped.every(a => a.unitCode === 'D1-01'), [...new Set(audScoped.map(a => a.unitCode))]);
+check('auditor reads only their scope (their department and its divisions)', audScoped.length > 0 && audScoped.every(a => ['D1-01', 'D1-01-01'].includes(a.unitCode)), [...new Set(audScoped.map(a => a.unitCode))]);
 const hist = (await L('GET', `/letters/${id1}`, 'head')).d.data.history;
 check('record History tab lists its operations', Array.isArray(hist) && hist.some(x => x.action === 'Archive') && hist.some(x => x.action === 'Refer'));
 check('History hidden from a plain recipient', (await L('GET', `/letters/${sens.id}`, 'emp')).d.data.history === null);

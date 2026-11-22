@@ -404,7 +404,7 @@ Once the application is running, log in with the initial administrative account:
 | Account | Email | Password | Role / Permissions |
 |---|---|---|---|
 | **System Administrator** | `admin@system.local` | `Admin@2026!` | Full Admin / All Permissions |
-| **Operational Staff** | `ahmed.faris89@gmail.com` | `Admin@2026!` | Standard Employee / Ticket Submitter |
+| **Operational Staff** | `staff@example.local` | `Admin@2026!` | Standard Employee / Ticket Submitter |
 
 > 🔒 **Security Best Practice:** After initial login, go to **User Management** -> Edit User -> Change Password to update passwords immediately.
 

@@ -8,3 +8,8 @@ logs
 .env
 .env.local
 .DS_Store
+letters archive
+capture
+hotfolders
+tools/scan-agent/bin
+tools/scan-agent/obj

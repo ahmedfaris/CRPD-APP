@@ -38,6 +38,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        TESSDATA: ${TESSDATA:-best} # "best" = more accurate Arabic OCR; "standard" = smaller image
     container_name: itsm_app
     restart: unless-stopped
     depends_on:
@@ -56,6 +58,14 @@ services:
       SQL_DB_NAME: ${POSTGRES_DB:-itsm_db}
       JWT_SECRET: ${JWT_SECRET:-production-local-jwt-secret-replace-in-env-2026}
       DATABASE_SSL: "false"
+      CAPTURE_CONCURRENCY: ${CAPTURE_CONCURRENCY:-1} # batches processed at the same time
+    volumes:
+      # Letters archive files (keep on RAID / backed-up storage) and the capture work area
+      - archive_files:/data/archive
+      - capture_work:/data/capture
+      # Hot folders: share these host folders with the MFPs / scanner PCs (SMB) and add each one in
+      # Archive > Administration > Capture with its container path, e.g. /hotfolders/registry-d1.
+      - ${HOTFOLDERS_DIR:-./hotfolders}:/hotfolders
     networks:
       - itsm_network
 
@@ -64,6 +74,10 @@ services:
 # -----------------------------------------------------------------------------
 volumes:
   postgres_data:
+    driver: local
+  archive_files:
+    driver: local
+  capture_work:
     driver: local
 
 networks:

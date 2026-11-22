@@ -19,6 +19,7 @@ export function LetterDetail({ id, onClose, onChanged }: { key?: React.Key; id: 
   const [tab, setTab] = useState<'details' | 'workflow' | 'files' | 'history'>('details');
   const [dialog, setDialog] = useState<Dialog>(null);
   const [busy, setBusy] = useState(false);
+  const [ocrView, setOcrView] = useState<{ name: string; text: string } | null>(null);
 
   const load = useCallback(async () => {
     const r = await las(`/letters/${id}`);
@@ -62,7 +63,8 @@ export function LetterDetail({ id, onClose, onChanged }: { key?: React.Key; id: 
       ${cc ? `<p><strong>${tr('نسخة منه إلى', 'Copy to')}:</strong> ${escapeHtml(cc)}</p>` : ''}`, lang, large);
   };
   const printLabel = async () => {
-    const qr = await QRCode.toDataURL(l.number, { margin: 1, width: 180 });
+    // "LAS1|REC|" lets a scanned page carrying this label be attached to the record automatically.
+    const qr = await QRCode.toDataURL(`LAS1|REC|${l.number}`, { margin: 1, width: 180 });
     printHtml(l.number, `<div class="label"><div>${escapeHtml(ar ? me.settings.institutionNameAr : me.settings.institutionNameEn)}</div>
       <img src="${qr}" alt="${escapeHtml(tr('رمز الاستجابة السريعة لرقم التسجيل', 'QR code of the registration number'))}">
       <div style="font-size:16pt;font-weight:bold" dir="ltr">${escapeHtml(l.number)}</div><div>${escapeHtml(fmtTime(l.archivedAt))}</div></div>`, lang);
@@ -271,8 +273,15 @@ export function LetterDetail({ id, onClose, onChanged }: { key?: React.Key; id: 
                     <div className="text-slate-700">{a.isOriginalScan ? tr('النسخة الأصلية الممسوحة', 'Original scan') : a.kind === 'dispatch_ack' ? tr('إقرار استلام', 'Acknowledgement') : a.kind === 'directive_scan' ? tr('الهامش الممسوح', 'Scanned directive') : tr('مرفق', 'Attachment')}
                       {l.report ? ` • ${tr('نسخة', 'version')} ${a.version}` : ''} • {(a.size / 1024).toFixed(0)} KB • {fmtTime(a.uploadedAt)}</div>
                     <div className="text-xs text-slate-600 break-all" dir="ltr">SHA-256: {a.sha256}</div>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {a.pdfaConformance && <span className="px-2 py-0.5 rounded-md border border-emerald-700 bg-emerald-50 text-emerald-900 text-xs font-bold">{tr(`أرشيفي PDF/A-${a.pdfaConformance}`, `Archival PDF/A-${a.pdfaConformance}`)}</span>}
+                      {a.kind === 'pdfa' && <span className="px-2 py-0.5 rounded-md border border-slate-500 text-xs font-bold">{tr('نسخة PDF/A مولّدة تلقائياً', 'PDF/A copy made automatically')}</span>}
+                      {['queued', 'processing'].includes(a.ocrStatus) && <span className="px-2 py-0.5 rounded-md border border-amber-700 bg-amber-50 text-amber-900 text-xs font-bold">{tr('جارٍ التعرف الضوئي والتحويل إلى PDF/A…', 'OCR and PDF/A conversion in progress…')}</span>}
+                      {a.ocrStatus === 'failed' && <span className="px-2 py-0.5 rounded-md border border-red-700 bg-red-50 text-red-900 text-xs font-bold">{tr('تعذر التعرف الضوئي', 'OCR failed')}</span>}
+                    </div>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    {a.hasOcr && <Btn onClick={async () => { const r = await las(`/attachments/${a.id}/text?letter=${filesLetterId}`); if (r.ok) setOcrView({ name: a.fileName, text: r.data.text }); else setError(r.error || ''); }} aria-label={tr(`قراءة نص ${a.fileName}`, `Read the text of ${a.fileName}`)}><FileText className="w-4 h-4" aria-hidden="true" />{tr('قراءة النص', 'Read text')}</Btn>}
                     <Btn onClick={async () => { if (!(await openAttachment(a.id, filesLetterId, a.fileName))) setError(tr('تعذر فتح الملف.', 'The file could not be opened.')); }} aria-label={tr(`عرض ${a.fileName}`, `View ${a.fileName}`)}><Eye className="w-4 h-4" aria-hidden="true" />{tr('عرض', 'View')}</Btn>
                     <Btn onClick={() => openAttachment(a.id, filesLetterId, a.fileName, true)} aria-label={tr(`تنزيل ${a.fileName}`, `Download ${a.fileName}`)}><Download className="w-4 h-4" aria-hidden="true" />{tr('تنزيل', 'Download')}</Btn>
                     {P.attach && !l.sourceLetterId && <Btn variant="danger" onClick={() => { if (window.confirm(tr('إزالة هذا الملف من السجل؟ تبقى العملية مسجلة.', 'Remove this file from the record? The removal is logged.'))) act(`/attachments/${a.id}`, undefined, tr('أُزيل الملف.', 'File removed.'), 'DELETE'); }} aria-label={tr(`إزالة ${a.fileName}`, `Remove ${a.fileName}`)}><Trash2 className="w-4 h-4" aria-hidden="true" /></Btn>}
@@ -294,6 +303,12 @@ export function LetterDetail({ id, onClose, onChanged }: { key?: React.Key; id: 
       </div>
 
       {/* ---- dialogs ---- */}
+      {ocrView && (
+        <Modal title={tr(`النص المستخرج — ${ocrView.name}`, `Extracted text — ${ocrView.name}`)} onClose={() => setOcrView(null)}>
+          <p className="text-sm text-slate-700 mb-2">{tr('نص تعرّف ضوئي آلي، قد يحتوي على أخطاء. الأصل هو الصورة الممسوحة.', 'Automatic OCR text; it may contain mistakes. The scanned image is the original.')}</p>
+          <textarea readOnly value={ocrView.text} dir="auto" aria-label={tr('النص المستخرج', 'Extracted text')} className={`${inputCls} h-[60vh] leading-7`} />
+        </Modal>
+      )}
       {dialog?.kind === 'approval' && <TextDialog title={{ Approved: tr('موافقة', 'Approve'), Returned: tr('إعادة مع ملاحظات', 'Return with comments'), Rejected: tr('رفض', 'Reject') }[dialog.payload as string]!}
         label={tr('الملاحظات', 'Comments')} required={dialog.payload !== 'Approved'} busy={busy} onClose={() => setDialog(null)}
         onSubmit={(text) => act(`/letters/${l.id}/approval`, { decision: dialog.payload, comment: text }, dialog.payload === 'Approved' ? tr('تمت الموافقة.', 'Approved.') : tr('تم تسجيل القرار.', 'Decision recorded.'))} />}

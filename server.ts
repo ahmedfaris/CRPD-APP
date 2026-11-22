@@ -21,7 +21,7 @@ import ticketRequestRoutes from './src/server/routes/ticketRequestRoutes.ts';
 import ticketArchiveRoutes from './src/server/routes/ticketArchiveRoutes.ts';
 import notificationRoutes from './src/server/routes/notificationRoutes.ts';
 import assetTypeRoutes from './src/server/routes/assetTypeRoutes.ts';
-import lasRoutes, { initLas } from './src/server/las/index.ts';
+import lasRoutes, { initLas, lasAgentRouter } from './src/server/las/index.ts';
 import { requireAuth } from './src/middleware/auth.ts';
 import { requireTicketFolderAccess } from './src/server/utils/ticketAccess.ts';
 import { TicketModel } from './src/server/models/ticketModel.ts';
@@ -87,6 +87,7 @@ async function startServer() {
   app.use("/api/tickets-archive", ticketArchiveRoutes);
   app.use("/api/notifications", notificationRoutes);
   app.use("/api/asset-types", assetTypeRoutes);
+  app.use("/api/las-agent", lasAgentRouter); // scanning agent: one-time scan tickets, no session
   app.use("/api/las", lasRoutes);
 
   // 404 handler for unmatched /api routes - strictly prevents falling through to Vite HTML

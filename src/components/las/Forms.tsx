@@ -100,12 +100,13 @@ function ContactField({ value, onChange, label }: { value: string; onChange: (v:
 // =======================================================================================
 // Incoming external letter (4.1)
 // =======================================================================================
-export function IncomingForm({ onDone }: FormProps) {
+/** With captureDocId the letter is registered from the capture queue: the scanned PDF/A is the original scan. */
+export function IncomingForm({ onDone, preset, captureDocId }: FormProps & { captureDocId?: number }) {
   const { tr, me } = useLas();
   const [v, setV] = useState<any>({
     unitId: me.registryUnits.length === 1 ? String(me.registryUnits[0]) : '', headOffice: false, contactId: '', externalRefNo: '', externalRefDate: '', receivedDate: me.today,
     letterDate: '', subject: '', summary: '', categoryId: '', urgency: 'Normal', confidentiality: 'Normal', namedUserUids: [], pagesCount: '', attachmentsCount: '',
-    building: '', room: '', cabinet: '', shelf: '', box: '',
+    building: '', room: '', cabinet: '', shelf: '', box: '', ...preset,
   });
   const [files, setFiles] = useState<PickedFile[]>([]);
   const [duplicate, setDuplicate] = useState<string[] | null>(null);
@@ -119,6 +120,7 @@ export function IncomingForm({ onDone }: FormProps) {
     const r = await las('/letters/incoming', 'POST', {
       ...v, unitId: Number(v.unitId), contactId: Number(v.contactId), categoryId: v.categoryId || null, pagesCount: v.pagesCount || null, attachmentsCount: v.attachmentsCount || null,
       physicalLocation: { building: v.building, room: v.room, cabinet: v.cabinet, shelf: v.shelf, box: v.box }, files, confirmDuplicate,
+      captureDocId: captureDocId || undefined,
     });
     if (r.code === 'DUPLICATE') { setDuplicate(r.raw.existing || []); return; }
     if (!r.ok) return s.setError(r.error || '');
@@ -157,8 +159,9 @@ export function IncomingForm({ onDone }: FormProps) {
       </Section>
       <Section title={tr('٣. النسخة الممسوحة ومكان الأصل الورقي', '3. Scan and location of the paper original')}>
         <div className="space-y-3">
-          <FilePicker label={tr('ملف الكتاب الممسوح والمرفقات', 'Scanned letter and attachments')} files={files} onChange={setFiles} markFirstAsScan
-            hint={tr('الملف الأول يُحفظ كنسخة أصلية. المسح المباشر من الماسح يحتاج برنامجاً وسيطاً على الحاسوب؛ حالياً ارفع الملف بعد مسحه.', 'The first file is kept as the original scan. Direct scanning needs a local agent; for now upload the scanned file.')} />
+          {captureDocId && <Notice kind="info">{tr('الوثيقة الممسوحة (PDF/A مع النص المستخرج) تُحفظ كنسخة أصلية لهذا الكتاب. يمكنك إضافة مرفقات أخرى أدناه.', 'The scanned document (PDF/A with its OCR text) is stored as this letter\'s original scan. You can add other attachments below.')}</Notice>}
+          <FilePicker label={captureDocId ? tr('مرفقات إضافية', 'Additional attachments') : tr('ملف الكتاب الممسوح والمرفقات', 'Scanned letter and attachments')} files={files} onChange={setFiles} markFirstAsScan={!captureDocId}
+            hint={captureDocId ? undefined : tr('الملف الأول يُحفظ كنسخة أصلية ويُحوَّل تلقائياً إلى PDF/A قابل للبحث. للمسح الدفعي استخدم «المسح الضوئي والفهرسة».', 'The first file is kept as the original scan and converted to searchable PDF/A automatically. For batch scanning use "Scanning and indexing".')} />
           <fieldset className="border border-slate-400 rounded-lg p-3">
             <legend className="px-1 text-sm font-semibold">{tr('مكان حفظ الأصل الورقي', 'Where the paper original is kept')}</legend>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
