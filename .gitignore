@@ -8,9 +8,9 @@ coverage/
 !.env.example
 
 # Letters archive runtime data and scanning agent build output
-letters archive/
-capture/
-hotfolders/
+/letters archive/
+/capture/
+/hotfolders/
 tools/scan-agent/bin/
 tools/scan-agent/obj/
 tests/capture-fixtures/pages/
