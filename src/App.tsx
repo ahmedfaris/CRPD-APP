@@ -149,7 +149,7 @@ function AppContent() {
           onSelectApp={setCurrentApp} 
           onSelectTicket={handleSelectTicketFromNav}
         />
-        <main className="flex-1">
+        <main className="flex-1 flex flex-col">
           <LasApp onBackToMetro={() => setCurrentApp('metro')} />
         </main>
       </div>

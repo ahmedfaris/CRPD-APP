@@ -94,6 +94,110 @@ function LetterLinkText({ id, text }: { id: number; text: string }) {
 // =======================================================================================
 // Search and archive browser (4.6, 2.4)
 // =======================================================================================
+// =======================================================================================
+// Mailboxes: browse incoming (وارد) or outgoing (صادر) official letters
+// =======================================================================================
+export function MailboxView({ direction, refreshKey }: { direction: 'IN' | 'OUT'; refreshKey: number }) {
+  const { tr, ar, fmtDate, me, unitName } = useLas();
+  const isIn = direction === 'IN';
+  const [scope, setScope] = useState<'' | 'external' | 'internal'>('');
+  const [status, setStatus] = useState<'' | 'open' | 'closed'>('open');
+  const [q, setQ] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [rows, setRows] = useState<any[] | null>(null);
+  const [err, setErr] = useState('');
+  const LIMIT = 300;
+
+  const load = useCallback(async (over: Partial<{ scope: string; status: string }> = {}) => {
+    const p = new URLSearchParams({ type: 'letter', direction, limit: String(LIMIT) });
+    const s = over.scope ?? scope; const st = over.status ?? status;
+    if (s) p.set('scope', s);
+    if (st) p.set('status', st);
+    if (q.trim()) p.set('q', q.trim());
+    if (from) p.set('from', from);
+    if (to) p.set('to', to);
+    const r = await las('/letters?' + p.toString());
+    if (!r.ok) { setErr(r.error || ''); return; }
+    setErr(''); setRows(r.data);
+  }, [direction, scope, status, q, from, to]);
+  // Reload when the mailbox changes or a record changes elsewhere; filters apply on "Show".
+  useEffect(() => { setRows(null); load(); }, [direction, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const seg = (value: string, current: string, label: string, onPick: () => void) => (
+    <button type="button" aria-pressed={current === value} onClick={onPick}
+      className={`las-btn min-h-[40px] px-3 text-sm font-bold border first:rounded-s-lg last:rounded-e-lg -ms-px focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 ${current === value ? 'bg-blue-800 text-white border-blue-900 z-10' : 'bg-white text-slate-900 border-slate-400 hover:bg-slate-100'}`}>{label}</button>
+  );
+  const party = (l: any) => isIn
+    ? (l.scope === 'internal' ? (l.externalRefNo ? tr(`من ${l.externalRefNo}`, `from ${l.externalRefNo}`) : '') : (l.contactName || ''))
+    : (l.scope === 'internal' ? (l.toUnitIds || []).map((id: number) => unitName(id)).join('، ') : (l.contactName || ''));
+  const exportCsv = () => rows && downloadCsv(`${isIn ? 'incoming' : 'outgoing'}-${me.today}.csv`,
+    ['Number', 'Scope', 'Unit', isIn ? 'From' : 'To', 'Subject', isIn ? 'Sender ref' : 'Reference', 'Date', 'Status', 'Urgency', 'Due'],
+    rows.map(l => [l.number || 'Draft', l.scope, l.unitCode, party(l), l.subject, l.externalRefNo, l.letterDate || (l.archivedAt || l.createdAt || '').slice(0, 10), l.status, l.urgency, l.dueDate]));
+
+  return (
+    <div className="space-y-4">
+      <form className="las-card bg-white border border-slate-300 rounded-xl p-4 space-y-3" onSubmit={e => { e.preventDefault(); load(); }} aria-label={isIn ? tr('تصفية البريد الوارد', 'Filter incoming mail') : tr('تصفية البريد الصادر', 'Filter outgoing mail')}>
+        <div className="flex flex-wrap gap-4">
+          <div role="group" aria-label={tr('داخلي أو خارجي', 'Internal or external')} className="flex">
+            {seg('', scope, tr('الكل', 'All'), () => { setScope(''); load({ scope: '' }); })}
+            {seg('external', scope, isIn ? tr('وارد خارجي', 'External') : tr('صادر خارجي', 'External'), () => { setScope('external'); load({ scope: 'external' }); })}
+            {seg('internal', scope, isIn ? tr('وارد داخلي', 'Internal') : tr('صادر داخلي', 'Internal'), () => { setScope('internal'); load({ scope: 'internal' }); })}
+          </div>
+          <div role="group" aria-label={tr('الحالة', 'Status')} className="flex">
+            {seg('open', status, tr('قيد المتابعة', 'Open'), () => { setStatus('open'); load({ status: 'open' }); })}
+            {seg('closed', status, tr('منتهية', 'Finished'), () => { setStatus('closed'); load({ status: 'closed' }); })}
+            {seg('', status, tr('الكل', 'All'), () => { setStatus(''); load({ status: '' }); })}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+          <div className="sm:col-span-2">
+            <Field label={tr('بحث', 'Search')} hint={tr('الرقم، الموضوع، الجهة، أو نص الكتاب الممسوح.', 'Number, subject, party, or text of the scan.')}>
+              {(p) => <input {...p} type="search" value={q} onChange={e => setQ(e.target.value)} className={inputCls} />}
+            </Field>
+          </div>
+          <Field label={tr('من تاريخ', 'From')}>{(p) => <input {...p} type="date" value={from} onChange={e => setFrom(e.target.value)} className={inputCls} />}</Field>
+          <Field label={tr('إلى تاريخ', 'To')}>{(p) => <input {...p} type="date" value={to} onChange={e => setTo(e.target.value)} className={inputCls} />}</Field>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Btn type="submit" variant="primary"><Search className="w-4 h-4" aria-hidden="true" />{tr('عرض', 'Show')}</Btn>
+          <Btn onClick={exportCsv} disabled={!rows?.length}><Download className="w-4 h-4" aria-hidden="true" />{tr('تصدير Excel (CSV)', 'Export to Excel (CSV)')}</Btn>
+        </div>
+      </form>
+      {err && <Notice kind="error">{err}</Notice>}
+      <p role="status" aria-live="polite" className="text-sm font-semibold">
+        {rows === null ? tr('جارٍ التحميل…', 'Loading…') : tr(`${rows.length} كتاب`, `${rows.length} letters`)}
+        {rows && rows.length >= LIMIT ? tr(' — تُعرض أحدث النتائج فقط؛ ضيّق البحث بالتاريخ.', ' — only the newest are shown; narrow the dates.') : ''}
+      </p>
+      {rows && rows.length === 0 && <p className="text-sm text-slate-700">{isIn ? tr('لا يوجد بريد وارد مطابق.', 'No matching incoming mail.') : tr('لا يوجد بريد صادر مطابق.', 'No matching outgoing mail.')}</p>}
+      {rows && rows.length > 0 && (
+        <div className="las-card bg-white border border-slate-300 rounded-xl overflow-x-auto">
+          <table className="w-full text-sm" data-mailbox={direction}>
+            <caption className="sr-only">{isIn ? tr('البريد الوارد', 'Incoming mail') : tr('البريد الصادر', 'Outgoing mail')}</caption>
+            <thead><tr className="border-b border-slate-400 bg-slate-100">
+              <th scope="col" className={th}>{tr('الرقم والموضوع', 'Number and subject')}</th>
+              <th scope="col" className={th}>{isIn ? tr('من', 'From') : tr('إلى', 'To')}</th>
+              <th scope="col" className={th}>{tr('الوحدة', 'Unit')}</th>
+              <th scope="col" className={th}>{tr('التاريخ', 'Date')}</th>
+              <th scope="col" className={th}>{tr('الحالة', 'Status')}</th>
+            </tr></thead>
+            <tbody>{rows.map(l => (
+              <tr key={l.id} className="border-b border-slate-200">
+                <td className={td}><LetterLink id={l.id} number={l.number} subject={l.subject} />
+                  <div className="text-slate-700">{l.scope === 'internal' ? (isIn ? tr('وارد داخلي', 'Internal') : tr('صادر داخلي', 'Internal')) : (isIn ? tr('وارد خارجي', 'External') : tr('صادر خارجي', 'External'))}{l.isMemo ? tr(' — مذكرة', ' — memo') : ''}</div></td>
+                <td className={td}>{party(l) || '—'}{isIn && l.scope === 'external' && l.externalRefNo ? <div className="text-slate-700">{tr('رقم كتابهم', 'Their ref')}: {l.externalRefNo}</div> : null}</td>
+                <td className={td} dir="ltr"><span className="block text-start">{l.unitCode}</span></td>
+                <td className={td}>{fmtDate(l.letterDate || (l.archivedAt || l.createdAt || '').slice(0, 10))}{l.dueDate ? <div className="text-slate-700">{tr('الموعد', 'Due')}: {fmtDate(l.dueDate)}</div> : null}</td>
+                <td className={td}><div className="flex flex-wrap gap-1"><StatusBadge status={l.status} /><Flags l={l} /></div></td>
+              </tr>))}</tbody>
+          </table>
+        </div>
+      )}
+      {void ar}
+    </div>
+  );
+}
+
 export function ArchiveView({ refreshKey, focusSearch }: { refreshKey: number; focusSearch: number }) {
   const { tr, ar, categories, contacts, fmtDate, me } = useLas();
   const [f, setF] = useState<any>({ q: '', type: '', direction: '', scope: '', unitId: '', categoryId: '', status: '', urgency: '', from: '', to: '', contactId: '', reportKind: '', overdue: false });

@@ -822,7 +822,10 @@ router.get('/letters', h(async (ctx, req, res) => {
   if (p.type) add('l.archive_type = ?', oneOf(p.type, 'Type', ['letter', 'mutalaa', 'report'] as const));
   if (p.direction) add('l.direction = ?', oneOf(p.direction, 'Direction', ['IN', 'OUT'] as const));
   if (p.scope) add('l.scope = ?', oneOf(p.scope, 'Scope', ['internal', 'external'] as const));
-  if (p.status) add('l.status = ?', str(p.status, 'Status', 30));
+  // "open" = still being worked on; "closed" = finished. Otherwise one exact status.
+  if (p.status === 'open') where.push(`l.status IN ('Draft','Returned','Awaiting approval','Registered','Referred','In progress')`);
+  else if (p.status === 'closed') where.push(`l.status IN ('Replied','Closed','Archived','Cancelled','Rejected')`);
+  else if (p.status) add('l.status = ?', str(p.status, 'Status', 30));
   if (p.urgency) add('l.urgency = ?', oneOf(p.urgency, 'Urgency', URGENCIES));
   if (p.categoryId) add('l.category_id = ?', int(p.categoryId, 'Category'));
   if (p.contactId) add('l.contact_id = ?', int(p.contactId, 'Contact'));
