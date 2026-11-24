@@ -2,6 +2,7 @@
 // Accessibility (section 5): every field has a visible label, status is never colour alone,
 // focus is always visible, targets are at least 40px high, and text follows the page language.
 import React, { createContext, useContext, useEffect, useId, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   CheckCircle2, Clock, AlertTriangle, FileEdit, Send, Archive, XCircle, CornerUpLeft, Inbox, Lock, ShieldAlert, Flame, X,
 } from 'lucide-react';
@@ -180,15 +181,20 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
     if (d && !d.open) d.showModal();
     return () => { if (d?.open) d.close(); };
   }, []);
-  return (
-    <dialog ref={ref} aria-labelledby={id} lang={lang} dir={ar ? 'rtl' : 'ltr'} onCancel={(e) => { e.preventDefault(); onClose(); }}
+  // Rendered at the end of <body>, not inside the page: a dialog opened from inside a form (e.g.
+  // "add a party" in the registration form) would otherwise put a form inside a form, and saving it
+  // made the browser submit the outer page form natively — reloading the app.
+  // onSubmit also stops React's submit event from reaching a form in the component tree below.
+  return createPortal(
+    <dialog ref={ref} aria-labelledby={id} lang={lang} dir={ar ? 'rtl' : 'ltr'} onCancel={(e) => { e.preventDefault(); onClose(); }} onSubmit={(e) => e.stopPropagation()}
       className={`las-root las-dialog ${highContrast ? 'las-hc' : ''} rounded-2xl border border-slate-500 p-0 w-full ${wide ? 'max-w-5xl' : 'max-w-2xl'} max-h-[92vh] backdrop:bg-slate-900/60 text-slate-900 bg-white`}>
       <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-slate-300 sticky top-0 bg-white z-10">
         <h2 id={id} className="text-lg font-bold">{title}</h2>
         <button type="button" onClick={onClose} aria-label={ar ? 'إغلاق' : 'Close'} className="min-w-[40px] min-h-[40px] rounded-lg border border-slate-400 hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"><X className="w-5 h-5 mx-auto" aria-hidden="true" /></button>
       </div>
       <div className="p-5">{children}</div>
-    </dialog>
+    </dialog>,
+    document.body,
   );
 }
 
