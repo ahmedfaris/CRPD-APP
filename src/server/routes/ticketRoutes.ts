@@ -12,6 +12,7 @@ const router = Router();
 // Metric & Settings Endpoints (Must precede parameterized /:id)
 router.get('/metrics', requireAuth, TicketController.getMetrics);
 router.get('/settings', requireAuth, TicketController.getSettings);
+router.get('/reports/user-requests', requireAuth, TicketController.getUserRequestReport);
 router.put('/settings', requireAuth, TicketController.updateSettings);
 
 // Support Team Endpoints

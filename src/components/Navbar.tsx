@@ -18,12 +18,13 @@ import {
   Moon,
   Sun,
   LayoutDashboard,
-  Ticket
+  Ticket,
+  FileBarChart
 } from 'lucide-react';
 
 interface NavbarProps {
-  currentTab: 'tickets' | 'dashboard' | 'users';
-  onSelectTab: (tab: 'tickets' | 'dashboard' | 'users') => void;
+  currentTab: 'tickets' | 'dashboard' | 'reports' | 'users';
+  onSelectTab: (tab: 'tickets' | 'dashboard' | 'reports' | 'users') => void;
   onOpenCreateTicket?: () => void;
   onBackToMetro?: () => void;
   onSelectTicket?: (ticketId: string) => void;
@@ -103,6 +104,22 @@ export function Navbar({
                 <span>{language === 'ar' ? 'لوحة تحكم التذاكر' : 'Tickets Dashboard'}</span>
               </button>
               
+              {/* User requests report */}
+              <button
+                id="nav-user-request-report"
+                onClick={() => onSelectTab('reports')}
+                aria-current={currentTab === 'reports' ? 'page' : undefined}
+                className={`px-3.5 py-2 rounded-xl text-sm sm:text-base font-bold transition-colors flex items-center space-x-2 cursor-pointer ${
+                  currentTab === 'reports'
+                    ? 'bg-slate-800 text-white shadow-xs ring-1 ring-slate-700'
+                    : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                }`}
+                title={language === 'ar' ? 'تقرير طلبات المستخدمين خلال فترة' : 'User requests in a period'}
+              >
+                <FileBarChart className="w-4.5 h-4.5 text-amber-400 mx-0.5" />
+                <span className="whitespace-nowrap">{language === 'ar' ? 'تقرير طلبات المستخدمين' : 'User Requests Report'}</span>
+              </button>
+
               {canAccessTeamManagement && (
                 <button
                   id="nav-users"

@@ -19,6 +19,7 @@ import { HardwareAssetSelector, mapDeviceTypeToHardwareType } from './HardwareAs
 import { WordEditor } from './WordEditor';
 import { PictureAttachmentsUploader } from './PictureAttachmentsUploader';
 import { StarPrioritySelector, starsToPriority } from './StarPrioritySelector';
+import { USER_REQUEST_ACTION_LIST, ACTIONS_NEEDING_REQUEST_INFO, userRequestActionLabel, missingUserRequestFields } from '../utils/userRequests';
 import { 
   X, 
   Wrench, 
@@ -64,14 +65,8 @@ const HARDWARE_DEVICE_TYPES: HardwareDeviceType[] = [
   'Other Device',
 ];
 
-const USER_REQUEST_ACTIONS: UserRequestAction[] = [
-  'Create New User',
-  'Delete User',
-  'Modify User Account & Permissions',
-  'Reset Password / Unlock Account',
-  'Role & Privilege Elevation',
-  'Other Request',
-];
+const USER_REQUEST_ACTIONS = USER_REQUEST_ACTION_LIST as unknown as UserRequestAction[];
+const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
 export function CreateTicketModal({ onClose, onCreated }: CreateTicketModalProps) {
   const { createTicket, tickets, addComment, systemSettings } = useTickets();
@@ -129,6 +124,9 @@ export function CreateTicketModal({ onClose, onCreated }: CreateTicketModalProps
   const [targetFullName, setTargetFullName] = useState('');
   const [targetUsername, setTargetUsername] = useState('');
   const [targetDepartment, setTargetDepartment] = useState('');
+  const [requestNumber, setRequestNumber] = useState('');
+  const [requestDate, setRequestDate] = useState('');
+  const [userReqErrors, setUserReqErrors] = useState<string[]>([]);
   const [roleOrPermissions, setRoleOrPermissions] = useState('');
   const [businessJustification, setBusinessJustification] = useState('');
 
@@ -198,19 +196,8 @@ export function CreateTicketModal({ onClose, onCreated }: CreateTicketModalProps
     return sys;
   };
 
-  const getUserActionLabel = (action: UserRequestAction) => {
-    if (language === 'ar') {
-      switch (action) {
-        case 'Create New User': return 'إنشاء حساب مستخدم جديد';
-        case 'Delete User': return 'حذف أو إلغاء حساب مستخدم';
-        case 'Modify User Account & Permissions': return 'تعديل بيانات الحساب والصلاحيات';
-        case 'Reset Password / Unlock Account': return 'إعادة تعيين كلمة المرور / إلغاء القفل';
-        case 'Role & Privilege Elevation': return 'ترقية الأدوار والامتيازات';
-        case 'Other Request': return 'طلب وصول / إجراء آخر...';
-      }
-    }
-    return action;
-  };
+  const getUserActionLabel = (action: UserRequestAction) => userRequestActionLabel(action, language === 'ar' ? 'ar' : 'en');
+  const needsRequestInfo = ACTIONS_NEEDING_REQUEST_INFO.has(userRequestAction);
 
   const getTeamName = (_type?: TicketType) => {
     return language === 'ar'
@@ -225,6 +212,15 @@ export function CreateTicketModal({ onClose, onCreated }: CreateTicketModalProps
     if (!title.trim()) {
       alert(language === 'ar' ? 'يرجى إدخال عنوان البلاغ قبل المتابعة للتأكيد.' : 'Please enter a ticket title before proceeding.');
       return;
+    }
+
+    if (selectedType === 'User Request') {
+      const missing = missingUserRequestFields(userRequestAction, { targetUsername, targetDepartment, requestNumber, requestDate }, todayLocal());
+      setUserReqErrors(missing);
+      if (missing.length) {
+        requestAnimationFrame(() => document.getElementById(`ur-${missing[0]}`)?.focus());
+        return;
+      }
     }
 
     if (selectedType === 'Hardware Maintenance' && !selectedDevice && !assetType.trim()) {
@@ -271,6 +267,8 @@ export function CreateTicketModal({ onClose, onCreated }: CreateTicketModalProps
             targetFullName: targetFullName.trim(),
             targetUsername: targetUsername.trim(),
             targetDepartment: targetDepartment.trim(),
+            requestNumber: requestNumber.trim(),
+            requestDate: requestDate || undefined,
             roleOrPermissions: roleOrPermissions.trim(),
             businessJustification: businessJustification.trim(),
           } : undefined,
@@ -321,7 +319,7 @@ export function CreateTicketModal({ onClose, onCreated }: CreateTicketModalProps
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-bold text-slate-900">
-                {language === 'ar' ? 'حوار إنشاء تذكرة جديدة: صيانة الأجهزة والمعدات' : 'New Ticket Dialog: Hardware Maintenance'}
+                {language === 'ar' ? 'إنشاء تذكرة جديدة: ' : 'New ticket: '}{getTicketTypeTitle(selectedType)}
               </h2>
               <p className="text-xs text-slate-500">
                 {language === 'ar'
@@ -332,9 +330,11 @@ export function CreateTicketModal({ onClose, onCreated }: CreateTicketModalProps
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition cursor-pointer"
+            aria-label={language === 'ar' ? 'إغلاق' : 'Close'}
+            title={language === 'ar' ? 'إغلاق' : 'Close'}
+            className="p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-200 transition cursor-pointer"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
 
@@ -551,7 +551,8 @@ export function CreateTicketModal({ onClose, onCreated }: CreateTicketModalProps
                       <button
                         key={action}
                         type="button"
-                        onClick={() => setUserRequestAction(action)}
+                        onClick={() => { setUserRequestAction(action); setUserReqErrors([]); }}
+                        aria-pressed={userRequestAction === action}
                         className={`py-1.5 px-2.5 rounded-lg text-xs font-semibold border transition text-start cursor-pointer ${
                           userRequestAction === action
                             ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs'
@@ -562,32 +563,20 @@ export function CreateTicketModal({ onClose, onCreated }: CreateTicketModalProps
                       </button>
                     ))}
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                        {language === 'ar' ? 'اسم الموظف المعني' : 'Target Employee Name'}
-                      </label>
-                      <input
-                        type="text"
-                        value={targetFullName}
-                        onChange={(e) => setTargetFullName(e.target.value)}
-                        placeholder={language === 'ar' ? 'الاسم الكامل...' : 'Full Name...'}
-                        className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-xs text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                        {language === 'ar' ? 'الدور أو الصلاحيات المطلوبة' : 'Requested Role'}
-                      </label>
-                      <input
-                        type="text"
-                        value={roleOrPermissions}
-                        onChange={(e) => setRoleOrPermissions(e.target.value)}
-                        placeholder={language === 'ar' ? 'الصلاحيات...' : 'Permissions...'}
-                        className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-xs text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </div>
-                  </div>
+                  <UserRequestFields
+                    ar={language === 'ar'}
+                    required={needsRequestInfo}
+                    errors={userReqErrors}
+                    departments={orgDepts.map(d => (language === 'ar' ? d.nameAr || d.nameEn : d.nameEn || d.nameAr)).filter(Boolean)}
+                    showPermissions={userRequestAction !== 'Suspend User' && userRequestAction !== 'Delete User' && userRequestAction !== 'Reset Password / Unlock Account'}
+                    values={{ targetUsername, targetFullName, targetDepartment, requestNumber, requestDate, roleOrPermissions, businessJustification }}
+                    onChange={(k, v) => {
+                      const set: Record<string, (x: string) => void> = { targetUsername: setTargetUsername, targetFullName: setTargetFullName, targetDepartment: setTargetDepartment, requestNumber: setRequestNumber, requestDate: setRequestDate, roleOrPermissions: setRoleOrPermissions, businessJustification: setBusinessJustification };
+                      set[k](v);
+                      if (userReqErrors.includes(k)) setUserReqErrors(userReqErrors.filter(e => e !== k));
+                    }}
+                    max={todayLocal()}
+                  />
                 </div>
               )}
 
@@ -723,6 +712,20 @@ export function CreateTicketModal({ onClose, onCreated }: CreateTicketModalProps
                 </div>
 
               </div>
+
+              {selectedType === 'User Request' && (
+                <div className="p-4 rounded-2xl border-2 border-emerald-300 bg-emerald-50/50 space-y-3" data-testid="user-request-summary">
+                  <div className="text-xs font-bold text-emerald-950 border-b border-emerald-200 pb-1.5">
+                    {language === 'ar' ? 'بيانات طلب المستخدم' : 'User request'}: {getUserActionLabel(userRequestAction)}
+                  </div>
+                  <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                    <div><dt className="text-slate-600">{language === 'ar' ? 'اسم المستخدم' : 'Username'}</dt><dd className="font-bold text-slate-900 break-all">{targetUsername || '—'}</dd></div>
+                    <div><dt className="text-slate-600">{language === 'ar' ? 'قسم المستخدم' : 'Department'}</dt><dd className="font-bold text-slate-900">{targetDepartment || '—'}</dd></div>
+                    <div><dt className="text-slate-600">{language === 'ar' ? 'رقم الطلب' : 'Request number'}</dt><dd className="font-bold text-slate-900">{requestNumber || '—'}</dd></div>
+                    <div><dt className="text-slate-600">{language === 'ar' ? 'تاريخ الطلب' : 'Request date'}</dt><dd className="font-bold text-slate-900" dir="ltr">{requestDate || '—'}</dd></div>
+                  </dl>
+                </div>
+              )}
 
               {/* Selected Asset Details Card */}
               {selectedType === 'Hardware Maintenance' && (
@@ -888,6 +891,76 @@ export function CreateTicketModal({ onClose, onCreated }: CreateTicketModalProps
         </div>
 
       </div>
+    </div>
+  );
+}
+
+
+/** Fields of a user-account request: who, which department, and the official request's number and date. */
+function UserRequestFields({ ar, required, errors, departments, showPermissions, values, onChange, max }: {
+  ar: boolean;
+  required: boolean;
+  errors: string[];
+  departments: string[];
+  showPermissions: boolean;
+  values: Record<'targetUsername' | 'targetFullName' | 'targetDepartment' | 'requestNumber' | 'requestDate' | 'roleOrPermissions' | 'businessJustification', string>;
+  onChange: (key: string, value: string) => void;
+  max: string;
+}) {
+  const inputCls = (bad: boolean) => `w-full px-3 py-2 border rounded-lg text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600 ${bad ? 'border-rose-600 ring-1 ring-rose-600' : 'border-slate-400'}`;
+  const msg: Record<string, string> = ar ? {
+    targetUsername: 'أدخل اسم المستخدم.',
+    targetDepartment: 'أدخل قسم المستخدم.',
+    requestNumber: 'أدخل رقم الطلب.',
+    requestDate: 'أدخل تاريخ الطلب (لا يكون بعد اليوم).',
+  } : {
+    targetUsername: 'Enter the username.',
+    targetDepartment: "Enter the user's department.",
+    requestNumber: 'Enter the request number.',
+    requestDate: 'Enter the request date (not after today).',
+  };
+  const field = (key: keyof typeof values, label: string, opts: { req?: boolean; type?: string; placeholder?: string; list?: string; dir?: 'ltr'; wide?: boolean; area?: boolean } = {}) => {
+    const bad = errors.includes(key);
+    const id = `ur-${key}`;
+    return (
+      <div className={opts.wide ? 'sm:col-span-2' : ''}>
+        <label htmlFor={id} className="block text-xs font-bold text-slate-800 mb-1">
+          {label}{opts.req && <span className="text-rose-700" aria-hidden="true"> *</span>}
+        </label>
+        {opts.area ? (
+          <textarea id={id} rows={2} value={values[key]} onChange={e => onChange(key, e.target.value)} className={inputCls(bad)} placeholder={opts.placeholder} />
+        ) : (
+          <input id={id} type={opts.type || 'text'} value={values[key]} onChange={e => onChange(key, e.target.value)}
+            required={opts.req} aria-required={opts.req || undefined} aria-invalid={bad || undefined} aria-describedby={bad ? `${id}-err` : undefined}
+            list={opts.list} dir={opts.dir} max={opts.type === 'date' ? max : undefined} placeholder={opts.placeholder} autoComplete="off"
+            className={inputCls(bad)} />
+        )}
+        {bad && <p id={`${id}-err`} className="mt-1 text-xs font-semibold text-rose-700">{msg[key]}</p>}
+      </div>
+    );
+  };
+  return (
+    <div className="space-y-3 pt-1">
+      {required && (
+        <p className="text-xs text-emerald-950">
+          {ar ? 'الحقول المعلَّمة بـ * مطلوبة لطلبات الإنشاء والإيقاف وتعديل الصلاحيات.' : 'Fields marked * are required to create, suspend or change a user.'}
+        </p>
+      )}
+      {errors.length > 0 && (
+        <div role="alert" className="text-xs font-semibold text-rose-800 bg-rose-50 border border-rose-300 rounded-lg px-3 py-2">
+          {ar ? 'أكمل بيانات الطلب قبل المتابعة.' : 'Complete the request details before continuing.'}
+        </div>
+      )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {field('targetUsername', ar ? 'اسم المستخدم' : 'Username', { req: required, dir: 'ltr', placeholder: 'e.g. a.hassan' })}
+        {field('targetFullName', ar ? 'الاسم الكامل للموظف' : 'Employee full name')}
+        {field('targetDepartment', ar ? 'قسم المستخدم' : "User's department", { req: required, list: 'ur-departments' })}
+        {field('requestNumber', ar ? 'رقم الطلب' : 'Request number', { req: required })}
+        {field('requestDate', ar ? 'تاريخ الطلب' : 'Request date', { req: required, type: 'date' })}
+        {showPermissions && field('roleOrPermissions', ar ? 'الصلاحيات المطلوبة' : 'Requested permissions')}
+        {field('businessJustification', ar ? 'ملاحظات / سبب الطلب' : 'Notes / reason', { wide: true, area: true })}
+      </div>
+      <datalist id="ur-departments">{departments.map(d => <option key={d} value={d} />)}</datalist>
     </div>
   );
 }

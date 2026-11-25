@@ -244,6 +244,7 @@ export type SupportedInformationSystem =
 
 export type UserRequestAction = 
   | 'Create New User'
+  | 'Suspend User'
   | 'Delete User'
   | 'Modify User Account & Permissions'
   | 'Reset Password / Unlock Account'
@@ -430,6 +431,8 @@ export interface Ticket {
     targetFullName?: string;
     targetUsername?: string;
     targetDepartment?: string;
+    requestNumber?: string; // number of the official request letter
+    requestDate?: string;   // date of the official request (YYYY-MM-DD)
     roleOrPermissions?: string;
     businessJustification?: string;
   };

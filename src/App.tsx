@@ -14,6 +14,7 @@ import { TicketList } from './components/TicketList';
 import { TicketDetailModal } from './components/TicketDetailModal';
 import { CreateTicketModal } from './components/CreateTicketModal';
 import { DashboardView } from './components/DashboardView';
+import { UserRequestReportView } from './components/UserRequestReportView';
 import { UserManagementView } from './components/UserManagementView';
 import { TeamManagementView } from './components/TeamManagementView';
 import { UserManagementAppView } from './components/UserManagementAppView';
@@ -77,7 +78,7 @@ function AppContent() {
   const [currentApp, setCurrentApp] = useState<'metro' | 'tickets' | 'archiving' | 'employees' | 'policy' | 'org-structure' | 'devices'>('metro');
 
   // Ticket Management Sub-tabs
-  const [currentTab, setCurrentTab] = useState<'tickets' | 'dashboard' | 'users'>('tickets');
+  const [currentTab, setCurrentTab] = useState<'tickets' | 'dashboard' | 'reports' | 'users'>('tickets');
   const [teamSubTab, setTeamSubTab] = useState<'teams' | 'roles'>('teams');
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -290,6 +291,10 @@ function AppContent() {
             onSelectTicket={(ticket: Ticket) => setSelectedTicketId(ticket.id)}
             onOpenCreate={canCreateTicket ? () => setShowCreateModal(true) : undefined}
           />
+        )}
+
+        {currentTab === 'reports' && (
+          <UserRequestReportView onSelectTicket={(id) => setSelectedTicketId(id)} />
         )}
 
         {currentTab === 'users' && canAccessTeamManagement && (

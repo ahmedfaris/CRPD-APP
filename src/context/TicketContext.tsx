@@ -48,6 +48,8 @@ export interface CreateTicketInput {
     targetFullName?: string;
     targetUsername?: string;
     targetDepartment?: string;
+    requestNumber?: string; // number of the official request letter
+    requestDate?: string;   // date of the official request (YYYY-MM-DD)
     roleOrPermissions?: string;
     businessJustification?: string;
   };

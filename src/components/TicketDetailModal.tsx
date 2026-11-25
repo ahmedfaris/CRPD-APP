@@ -13,6 +13,7 @@ import {
 } from '../types';
 import { StarPrioritySelector, starsToPriority } from './StarPrioritySelector';
 import { PictureAttachmentsUploader } from './PictureAttachmentsUploader';
+import { userRequestActionLabel } from '../utils/userRequests';
 import { 
   X, 
   Clock, 
@@ -393,16 +394,18 @@ export function TicketDetailModal({ ticketId, onClose }: TicketDetailModalProps)
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-emerald-950 flex items-center">
                     <UserPlus className="w-4 h-4 mx-1.5 text-emerald-600" />
-                    {language === 'ar' ? 'مواصفات طلب المستخدم' : 'User Request Specifications'} ({ticket.userRequestAction || 'Access'})
+                    {language === 'ar' ? 'مواصفات طلب المستخدم' : 'User Request Specifications'} ({userRequestActionLabel(ticket.userRequestAction, language === 'ar' ? 'ar' : 'en')})
                   </span>
                   <span className="px-2 py-0.5 rounded bg-emerald-200 text-emerald-900 font-semibold text-[11px]">
                     {ticket.targetSystem || 'Enterprise Directory'}
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-emerald-900 pt-1">
-                  <div><strong>{language === 'ar' ? 'المستخدم المعني:' : 'Target Full Name:'}</strong> {ticket.userRequestDetails.targetFullName || 'N/A'}</div>
-                  <div><strong>{language === 'ar' ? 'اسم المستخدم / البريد:' : 'Username / Email:'}</strong> {ticket.userRequestDetails.targetUsername || 'N/A'}</div>
-                  <div><strong>{language === 'ar' ? 'القسم:' : 'Department:'}</strong> {ticket.userRequestDetails.targetDepartment || 'N/A'}</div>
+                  <div><strong>{language === 'ar' ? 'اسم المستخدم:' : 'Username:'}</strong> <span dir="ltr">{ticket.userRequestDetails.targetUsername || '—'}</span></div>
+                  <div><strong>{language === 'ar' ? 'الاسم الكامل:' : 'Full name:'}</strong> {ticket.userRequestDetails.targetFullName || '—'}</div>
+                  <div><strong>{language === 'ar' ? 'قسم المستخدم:' : 'Department:'}</strong> {ticket.userRequestDetails.targetDepartment || '—'}</div>
+                  <div><strong>{language === 'ar' ? 'رقم الطلب:' : 'Request number:'}</strong> {ticket.userRequestDetails.requestNumber || '—'}</div>
+                  <div><strong>{language === 'ar' ? 'تاريخ الطلب:' : 'Request date:'}</strong> <span dir="ltr">{ticket.userRequestDetails.requestDate || '—'}</span></div>
                   <div><strong>{language === 'ar' ? 'الصلاحيات المطلوبة:' : 'Requested Roles:'}</strong> {ticket.userRequestDetails.roleOrPermissions || 'Standard'}</div>
                 </div>
                 {ticket.userRequestDetails.businessJustification && (

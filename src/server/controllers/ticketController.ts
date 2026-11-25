@@ -4,6 +4,7 @@ import { AuthRequest } from '../../middleware/auth.ts';
 import { TicketModel } from '../models/ticketModel.ts';
 import { logger } from '../utils/logger.ts';
 import { getTicketAccess, canViewTicket, sanitizeTicketFor, forbidTicket } from '../utils/ticketAccess.ts';
+import { USER_REQUEST_ACTION_LIST, missingUserRequestFields, isValidIsoDate } from '../../utils/userRequests.ts';
 
 function getParam(val: string | string[] | undefined): string {
   if (!val) return '';
@@ -89,6 +90,78 @@ export class TicketController {
   }
 
   /**
+   * GET /api/tickets/reports/user-requests?from=YYYY-MM-DD&to=YYYY-MM-DD[&action=&status=&department=]
+   * User-account requests in a date range (by the official request's date; the ticket's creation
+   * date for older tickets without one): totals by action, status and department, and the list.
+   * Only tickets the caller may see are counted.
+   */
+  static async getUserRequestReport(req: AuthRequest, res: Response) {
+    try {
+      const q = (k: string) => String(getParam(req.query[k] as any) || '').trim();
+      const from = q('from'), to = q('to');
+      if ((from && !isValidIsoDate(from)) || (to && !isValidIsoDate(to))) {
+        return res.status(400).json({ success: false, error: 'Dates must be YYYY-MM-DD' });
+      }
+      if (from && to && from > to) {
+        return res.status(400).json({ success: false, error: 'The start date is after the end date' });
+      }
+      const action = q('action'), status = q('status'), department = q('department').toLowerCase();
+      const access = await getTicketAccess(req);
+      const all = await TicketModel.getAllTickets({});
+      const rows = all
+        .filter((t: any) => t.ticketType === 'User Request' && canViewTicket(t, access))
+        .map((t: any) => {
+          const d = t.userRequestDetails || {};
+          const created = t.createdAt ? new Date(t.createdAt).toISOString().slice(0, 10) : '';
+          return {
+            id: t.id,
+            ticketNo: t.ticketNo,
+            username: d.targetUsername || '',
+            fullName: d.targetFullName || '',
+            department: d.targetDepartment || '',
+            action: t.userRequestAction || '',
+            requestNumber: d.requestNumber || '',
+            requestDate: d.requestDate || '',
+            date: d.requestDate || created,
+            createdAt: t.createdAt,
+            status: t.status,
+            stage: t.stage,
+            requesterName: t.requesterName,
+            assigneeName: t.assigneeName || '',
+          };
+        })
+        .filter(r => (!from || r.date >= from) && (!to || r.date <= to))
+        .filter(r => (!action || r.action === action) && (!status || r.status === status)
+          && (!department || r.department.toLowerCase().includes(department)))
+        .sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(b.ticketNo).localeCompare(String(a.ticketNo)));
+
+      const countBy = (key: 'action' | 'status' | 'department') => {
+        const m = new Map<string, number>();
+        for (const r of rows) { const k = r[key] || ''; m.set(k, (m.get(k) || 0) + 1); }
+        return [...m.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+      };
+      const done = rows.filter(r => r.status === 'Resolved' || r.status === 'Closed').length;
+      res.status(200).json({
+        success: true,
+        data: {
+          from: from || null,
+          to: to || null,
+          total: rows.length,
+          completed: done,
+          open: rows.length - done,
+          byAction: countBy('action'),
+          byStatus: countBy('status'),
+          byDepartment: countBy('department'),
+          rows,
+        },
+      });
+    } catch (error: any) {
+      logger.error('Failed to build the user request report: {Error}', { Error: error.message });
+      res.status(500).json({ success: false, error: 'Failed to build the report' });
+    }
+  }
+
+  /**
    * GET /api/tickets/:id
    * Retrieve single ticket with comments, history, and attachments
    */
@@ -140,6 +213,36 @@ export class TicketController {
           success: false,
           error: 'Ticket description is required',
         });
+      }
+
+      // User-account requests: creating, suspending or changing an account needs the username,
+      // its department, and the official request's number and date.
+      if (ticketType === 'User Request') {
+        const action = req.body.userRequestAction;
+        if (!action || !(USER_REQUEST_ACTION_LIST as readonly string[]).includes(action)) {
+          return res.status(400).json({ success: false, error: 'Choose the requested action' });
+        }
+        const raw = req.body.userRequestDetails && typeof req.body.userRequestDetails === 'object' ? req.body.userRequestDetails : {};
+        const clean = (v: unknown, max: number) => String(v ?? '').trim().slice(0, max);
+        const details = {
+          targetFullName: clean(raw.targetFullName, 200),
+          targetUsername: clean(raw.targetUsername, 120),
+          targetDepartment: clean(raw.targetDepartment, 200),
+          requestNumber: clean(raw.requestNumber, 60),
+          requestDate: isValidIsoDate(raw.requestDate) ? String(raw.requestDate) : '',
+          roleOrPermissions: clean(raw.roleOrPermissions, 1000),
+          businessJustification: clean(raw.businessJustification, 4000),
+        };
+        // Latest calendar date anywhere (UTC+14), so a request dated "today" is never rejected.
+        const latestToday = new Date(Date.now() + 14 * 3600 * 1000).toISOString().slice(0, 10);
+        const missing = missingUserRequestFields(action, details, latestToday);
+        if (missing.length) {
+          return res.status(400).json({ success: false, error: `Missing or invalid user request fields: ${missing.join(', ')}`, fields: missing });
+        }
+        req.body.userRequestDetails = details;
+      } else {
+        delete req.body.userRequestAction;
+        delete req.body.userRequestDetails;
       }
 
       // User requirement: Any ticket submitted by any user is sent to technical teams
