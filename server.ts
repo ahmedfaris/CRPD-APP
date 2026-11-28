@@ -1,6 +1,7 @@
 import express from "express";
 import http from "http";
 import path from "path";
+import fs from "fs";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import { createServer as createViteServer } from "vite";
@@ -111,7 +112,30 @@ async function startServer() {
   // Vite Middleware (Frontend serving)
   // ==========================================
   
-  if (process.env.NODE_ENV !== "production") {
+  // dist/ is only refreshed by "npm run build". When it is missing or older than the source
+  // (e.g. after "git pull") and the server runs from source ("npm run dev"), serve the current
+  // source through Vite instead of an outdated interface.
+  const runningFromSource = /server\.ts$/.test(process.argv[1] || '');
+  const distIndex = path.join(process.cwd(), 'dist', 'index.html');
+  const newestMtime = (p: string): number => {
+    try {
+      const st = fs.statSync(p);
+      if (!st.isDirectory()) return st.mtimeMs;
+      return fs.readdirSync(p).reduce((m, n) => Math.max(m, newestMtime(path.join(p, n))), 0);
+    } catch { return 0; }
+  };
+  let distOutdated = false;
+  if (process.env.NODE_ENV === "production") {
+    const builtAt = fs.existsSync(distIndex) ? fs.statSync(distIndex).mtimeMs : 0;
+    distOutdated = builtAt === 0 || (fs.existsSync(path.join(process.cwd(), 'src')) && newestMtime(path.join(process.cwd(), 'src')) > builtAt);
+    if (distOutdated) {
+      console.warn(runningFromSource
+        ? '⚠️  The compiled interface (dist/) is missing or older than the source code. Serving the current source instead. Run "npm run build" for faster pages.'
+        : '⚠️  The compiled app (dist/) is older than the source code. Run "npm run build" (or "npm start", which rebuilds automatically) to apply the update.');
+    }
+  }
+
+  if (process.env.NODE_ENV !== "production" || (distOutdated && runningFromSource)) {
     // In Development, let Vite handle frontend serving, attaching HMR directly to the HTTP server
     const vite = await createViteServer({
       server: {

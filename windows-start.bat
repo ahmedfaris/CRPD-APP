@@ -9,5 +9,6 @@ echo   Listening on http://localhost:3000
 echo ============================================================
 echo.
 
+REM "npm start" rebuilds the app first when the source code is newer (e.g. after an update).
 call npm start
 pause

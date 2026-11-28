@@ -15,7 +15,8 @@
     "db:seed": "tsx src/db/seed.ts",
     "db:test": "tsx src/db/test-connection.ts",
     "db:studio": "drizzle-kit studio --config=src/db/drizzle.config.ts",
-    "export:package": "bash scripts/export-package.sh"
+    "export:package": "bash scripts/export-package.sh",
+    "prestart": "node scripts/ensure-build.cjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",

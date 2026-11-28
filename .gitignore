@@ -15,3 +15,6 @@ tools/scan-agent/bin/
 tools/scan-agent/obj/
 tests/capture-fixtures/pages/
 tests/capture-fixtures/scans/
+
+# Database backups made by windows-update.bat
+/backups/
