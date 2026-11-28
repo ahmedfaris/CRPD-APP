@@ -411,6 +411,10 @@ export function MetroDashboard({
 
         </div>
 
+        <p className="mt-8 text-center text-xs text-slate-500 dark:text-slate-400" data-testid="app-version">
+          {language === 'ar' ? 'الإصدار' : 'Version'}: <span dir="ltr">{__APP_VERSION__}</span>
+        </p>
+
       </div>
     </div>
   );

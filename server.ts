@@ -148,11 +148,24 @@ async function startServer() {
   } else {
     // In Production, serve the static compiled dist/ directory
     const distPath = path.join(process.cwd(), 'dist');
+    try {
+      console.log(`Serving the interface from ${distPath} (built ${fs.statSync(path.join(distPath, 'index.html')).mtime.toLocaleString()})`);
+    } catch { console.warn(`No compiled interface found in ${distPath}. Run "npm run build".`); }
     app.use(express.static(distPath));
     app.use((req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
+  server.on('error', (err: any) => {
+    if (err?.code === 'EADDRINUSE') {
+      console.error(`\n❌ Port ${PORT} is already in use: another copy of the application (or another program) is running.`);
+      console.error('   The browser would keep showing that older copy. Close it first, for example on Windows:');
+      console.error(`   netstat -ano | findstr :${PORT}    then    taskkill /PID <number> /F\n`);
+      process.exit(1);
+    }
+    throw err;
+  });
 
   server.listen(PORT, "0.0.0.0", () => {
     console.log(`Node.js MVC Backend server running on port ${PORT}`);
